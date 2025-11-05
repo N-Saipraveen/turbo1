@@ -4,6 +4,8 @@ import { convertSqlToJson } from '../services/sqlToJson.js';
 import { convertSqlToMongo } from '../services/sqlToMongo.js';
 import { convertJsonToSql } from '../services/jsonToSql.js';
 import { convertMongoToSql } from '../services/mongoToSql.js';
+import { convertJsonToMongo } from '../services/jsonToMongo.js';
+import { convertMongoToJson } from '../services/mongoToJson.js';
 import { aiRefineMapping } from '../services/ai.js';
 import { logger } from '../lib/logger.js';
 
@@ -51,19 +53,11 @@ router.post('/', async (req, res) => {
         dialect as 'postgres' | 'mysql' | 'sqlite'
       );
     } else if (from === 'json' && to === 'mongo') {
-      // JSON to Mongo conversion
-      result = {
-        artifacts: { 'output.json': content },
-        summary: { info: 'JSON is already compatible with MongoDB' },
-        warnings: ['Direct import to MongoDB recommended'],
-      };
+      // JSON to Mongo conversion - create validation schema and setup script
+      result = await convertJsonToMongo(content);
     } else if (from === 'mongo' && to === 'json') {
-      // Mongo to JSON conversion
-      result = {
-        artifacts: { 'output.json': content },
-        summary: { info: 'MongoDB documents are JSON-compatible' },
-        warnings: [],
-      };
+      // Mongo to JSON conversion - infer JSON Schema
+      result = await convertMongoToJson(content);
     } else if (from === 'sql' && to === 'sql') {
       // SQL to SQL (dialect conversion)
       result = {

@@ -77,8 +77,12 @@ function parseCreateTable(statement: any): TableDefinition | null {
     for (const def of statement.create_definitions) {
       if (def.column) {
         // Column definition
+        const columnName = typeof def.column === 'string'
+          ? def.column
+          : (def.column.column || def.column.expr?.value || String(def.column));
+
         const column: ColumnDefinition = {
-          name: def.column.column,
+          name: columnName,
           type: parseDataType(def.definition),
           nullable: !def.nullable?.value || def.nullable.value !== 'not null',
           autoIncrement: def.auto_increment,
@@ -92,7 +96,10 @@ function parseCreateTable(statement: any): TableDefinition | null {
       } else if (def.constraint_type === 'primary key') {
         // Primary key constraint
         if (def.definition) {
-          primaryKeys.push(...def.definition.map((d: any) => d.column));
+          const pkCols = def.definition.map((d: any) => {
+            return typeof d === 'string' ? d : (d.column || d.expr?.value || String(d));
+          });
+          primaryKeys.push(...pkCols);
         }
       } else if (def.constraint_type === 'foreign key') {
         // Foreign key constraint
