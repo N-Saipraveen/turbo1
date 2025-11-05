@@ -63,6 +63,10 @@ async function testPostgresConnection(
     password: connection.password,
     max: 1,
     connectionTimeoutMillis: 5000,
+    // Always enforce SSL for security (required for cloud providers like Aiven)
+    ssl: {
+      rejectUnauthorized: false,
+    },
   });
 
   try {
@@ -101,6 +105,10 @@ async function testMysqlConnection(
     password: connection.password,
     database: connection.database,
     connectTimeout: 5000,
+    // Always enforce SSL for security (required for cloud providers like Aiven)
+    ssl: {
+      rejectUnauthorized: false,
+    },
   });
 
   try {
@@ -197,6 +205,10 @@ export async function getDatabaseConnection(connection: DatabaseConnection): Pro
         database: connection.database,
         user: connection.username,
         password: connection.password,
+        // Always enforce SSL for security (required for cloud providers like Aiven)
+        ssl: {
+          rejectUnauthorized: false,
+        },
       });
       return pool;
     }
@@ -209,6 +221,10 @@ export async function getDatabaseConnection(connection: DatabaseConnection): Pro
         database: connection.database,
         waitForConnections: true,
         connectionLimit: 10,
+        // Always enforce SSL for security (required for cloud providers like Aiven)
+        ssl: {
+          rejectUnauthorized: false,
+        },
       });
       return pool;
     }
