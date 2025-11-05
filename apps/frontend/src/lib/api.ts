@@ -69,7 +69,7 @@ export const checkHealth = async (): Promise<{ ok: boolean }> => {
 // Migration API
 
 export interface DatabaseConnection {
-  type: 'postgres' | 'mysql' | 'sqlite' | 'mongodb';
+  type: 'postgres' | 'mysql' | 'sqlite' | 'mongodb' | 'json';
   host?: string;
   port?: number;
   database?: string;
@@ -77,6 +77,7 @@ export interface DatabaseConnection {
   password?: string;
   filePath?: string;
   uri?: string;
+  jsonData?: any;
 }
 
 export interface ConnectionTestResult {
@@ -161,5 +162,36 @@ export const getMigrationStatus = async (
   migrationId: string
 ): Promise<{ logs: MigrationLog[]; progress: MigrationProgress[] }> => {
   const response = await api.get(`/api/migrate/migration-status/${migrationId}`);
+  return response.data;
+};
+
+export interface JsonMigrationPreview {
+  success: boolean;
+  schema?: string;
+  sampleData?: any[];
+  tableCount?: number;
+  recordCount?: number;
+  error?: string;
+}
+
+export const previewJsonMigration = async (
+  jsonData: any,
+  targetType: 'postgres' | 'mysql' | 'sqlite' | 'mongodb'
+): Promise<JsonMigrationPreview> => {
+  const response = await api.post('/api/migrate/preview-json-migration', {
+    jsonData,
+    targetType,
+  });
+  return response.data;
+};
+
+export const executeJsonMigration = async (
+  jsonData: any,
+  targetConnection: DatabaseConnection
+): Promise<{ success: boolean; message: string; recordsInserted?: number }> => {
+  const response = await api.post('/api/migrate/execute-json-migration', {
+    jsonData,
+    targetConnection,
+  });
   return response.data;
 };
