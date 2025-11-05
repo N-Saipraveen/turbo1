@@ -24,9 +24,12 @@ export async function previewJsonMigration(
     if (targetType === 'mongodb') {
       const result = await convertJsonToMongo(JSON.stringify(jsonData));
 
+      // Combine all artifacts into a single schema string
+      const schema = Object.values(result.artifacts).join('\n\n');
+
       return {
         success: true,
-        schema: result.output,
+        schema,
         sampleData: dataArray.slice(0, 3),
         tableCount: 1,
         recordCount: dataArray.length,
@@ -35,11 +38,14 @@ export async function previewJsonMigration(
       // SQL targets (postgres, mysql, sqlite)
       const result = await convertJsonToSql(JSON.stringify(jsonData), targetType);
 
+      // Combine all SQL artifacts into a single schema string
+      const schema = Object.values(result.artifacts).join('\n\n');
+
       return {
         success: true,
-        schema: result.output,
+        schema,
         sampleData: dataArray.slice(0, 3),
-        tableCount: result.tables?.length || 1,
+        tableCount: Object.keys(result.artifacts).length,
         recordCount: dataArray.length,
       };
     }
