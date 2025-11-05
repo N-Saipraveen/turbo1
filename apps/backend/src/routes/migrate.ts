@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { testDatabaseConnection, type DatabaseConnection } from '../services/dbConnection.js';
 import { introspectDatabaseSchema } from '../services/schemaIntrospection.js';
 import { MigrationEngine, type MigrationConfig } from '../services/migration.js';
+import { previewJsonMigration, executeJsonMigration } from '../services/jsonMigration.js';
 import { logger } from '../lib/logger.js';
 
 const router = express.Router();
@@ -12,7 +13,7 @@ const activeMigrations = new Map<string, MigrationEngine>();
 
 // Zod schemas for validation
 const DatabaseConnectionSchema = z.object({
-  type: z.enum(['postgres', 'mysql', 'sqlite', 'mongodb']),
+  type: z.enum(['postgres', 'mysql', 'sqlite', 'mongodb', 'json']),
   host: z.string().optional(),
   port: z.number().optional(),
   database: z.string().optional(),
@@ -20,6 +21,7 @@ const DatabaseConnectionSchema = z.object({
   password: z.string().optional(),
   filePath: z.string().optional(),
   uri: z.string().optional(),
+  jsonData: z.any().optional(),
 });
 
 const MigrationRequestSchema = z.object({
@@ -197,6 +199,68 @@ router.get('/migration-stream/:id', (req, res) => {
     migration.off('log', logHandler);
     migration.off('progress', progressHandler);
   });
+});
+
+// Preview JSON migration
+router.post('/preview-json-migration', async (req, res) => {
+  try {
+    const { jsonData, targetType } = req.body;
+
+    if (!jsonData || !targetType) {
+      return res.status(400).json({
+        error: 'JSON data and target type are required',
+      });
+    }
+
+    if (!['postgres', 'mysql', 'sqlite', 'mongodb'].includes(targetType)) {
+      return res.status(400).json({
+        error: 'Invalid target database type',
+      });
+    }
+
+    const preview = await previewJsonMigration(jsonData, targetType);
+    return res.json(preview);
+  } catch (error) {
+    logger.error('JSON migration preview failed', error);
+    return res.status(500).json({
+      error: 'Failed to generate preview',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// Execute JSON migration
+router.post('/execute-json-migration', async (req, res) => {
+  try {
+    const { jsonData, targetConnection } = req.body;
+
+    if (!jsonData || !targetConnection) {
+      return res.status(400).json({
+        error: 'JSON data and target connection are required',
+      });
+    }
+
+    const validation = DatabaseConnectionSchema.safeParse(targetConnection);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Invalid target connection parameters',
+        details: validation.error.errors,
+      });
+    }
+
+    const result = await executeJsonMigration(
+      jsonData,
+      validation.data as DatabaseConnection
+    );
+
+    return res.json(result);
+  } catch (error) {
+    logger.error('JSON migration execution failed', error);
+    return res.status(500).json({
+      error: 'Migration failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 });
 
 export default router;

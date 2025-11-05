@@ -5,7 +5,7 @@ import { MongoClient } from 'mongodb';
 
 const { Pool: PgPool } = pg;
 
-export type DatabaseType = 'postgres' | 'mysql' | 'sqlite' | 'mongodb';
+export type DatabaseType = 'postgres' | 'mysql' | 'sqlite' | 'mongodb' | 'json';
 
 export interface DatabaseConnection {
   type: DatabaseType;
@@ -16,6 +16,7 @@ export interface DatabaseConnection {
   password?: string;
   filePath?: string; // For SQLite
   uri?: string; // For MongoDB
+  jsonData?: any; // For JSON source migrations
 }
 
 export interface ConnectionTestResult {
@@ -38,6 +39,8 @@ export async function testDatabaseConnection(
         return await testSqliteConnection(connection);
       case 'mongodb':
         return await testMongoConnection(connection);
+      case 'json':
+        return await testJsonConnection(connection);
       default:
         return {
           success: false,
@@ -196,6 +199,32 @@ async function testMongoConnection(
   }
 }
 
+async function testJsonConnection(
+  connection: DatabaseConnection
+): Promise<ConnectionTestResult> {
+  if (!connection.jsonData) {
+    throw new Error('JSON data is required');
+  }
+
+  try {
+    const data = Array.isArray(connection.jsonData)
+      ? connection.jsonData
+      : [connection.jsonData];
+
+    const recordCount = data.length;
+    const tables = Array.isArray(connection.jsonData) ? ['data'] : Object.keys(connection.jsonData);
+
+    return {
+      success: true,
+      message: 'JSON data validated successfully',
+      version: `${recordCount} records`,
+      databases: tables,
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+
 export async function getDatabaseConnection(connection: DatabaseConnection): Promise<any> {
   switch (connection.type) {
     case 'postgres': {
@@ -242,6 +271,12 @@ export async function getDatabaseConnection(connection: DatabaseConnection): Pro
       await client.connect();
       return client;
     }
+    case 'json': {
+      if (!connection.jsonData) {
+        throw new Error('JSON data is required');
+      }
+      return connection.jsonData;
+    }
     default:
       throw new Error(`Unsupported database type: ${connection.type}`);
   }
@@ -261,6 +296,9 @@ export async function closeDatabaseConnection(type: DatabaseType, connection: an
         break;
       case 'mongodb':
         await connection.close();
+        break;
+      case 'json':
+        // No connection to close for JSON data
         break;
     }
   } catch (error) {
