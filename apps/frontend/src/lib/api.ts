@@ -65,3 +65,101 @@ export const checkHealth = async (): Promise<{ ok: boolean }> => {
   const response = await api.get('/health');
   return response.data;
 };
+
+// Migration API
+
+export interface DatabaseConnection {
+  type: 'postgres' | 'mysql' | 'sqlite' | 'mongodb';
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  filePath?: string;
+  uri?: string;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+  version?: string;
+  databases?: string[];
+}
+
+export interface TableSchema {
+  name: string;
+  columns: ColumnSchema[];
+  primaryKeys: string[];
+  foreignKeys: ForeignKeySchema[];
+  indexes: IndexSchema[];
+}
+
+export interface ColumnSchema {
+  name: string;
+  type: string;
+  nullable: boolean;
+  defaultValue?: string;
+  maxLength?: number;
+}
+
+export interface ForeignKeySchema {
+  column: string;
+  referencedTable: string;
+  referencedColumn: string;
+}
+
+export interface IndexSchema {
+  name: string;
+  columns: string[];
+  unique: boolean;
+}
+
+export interface MigrationProgress {
+  table: string;
+  totalRows: number;
+  migratedRows: number;
+  percentage: number;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  error?: string;
+}
+
+export interface MigrationLog {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  table?: string;
+}
+
+export const testConnection = async (
+  connection: DatabaseConnection
+): Promise<ConnectionTestResult> => {
+  const response = await api.post<ConnectionTestResult>(
+    '/api/migrate/test-connection',
+    connection
+  );
+  return response.data;
+};
+
+export const introspectSchema = async (
+  connection: DatabaseConnection
+): Promise<{ success: boolean; schema: TableSchema[] }> => {
+  const response = await api.post('/api/migrate/introspect-schema', connection);
+  return response.data;
+};
+
+export const startMigration = async (config: {
+  source: DatabaseConnection;
+  target: DatabaseConnection;
+  tables: string[];
+  batchSize?: number;
+}): Promise<{ success: boolean; migrationId: string; message: string }> => {
+  const response = await api.post('/api/migrate/start-migration', config);
+  return response.data;
+};
+
+export const getMigrationStatus = async (
+  migrationId: string
+): Promise<{ logs: MigrationLog[]; progress: MigrationProgress[] }> => {
+  const response = await api.get(`/api/migrate/migration-status/${migrationId}`);
+  return response.data;
+};
