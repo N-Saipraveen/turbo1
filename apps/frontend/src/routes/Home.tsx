@@ -98,7 +98,7 @@ export default function Home() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button className="w-full" variant="outline">Coming Soon</Button>
+                <Button className="w-full">Start Migration</Button>
               </CardContent>
             </Card>
           </motion.div>
