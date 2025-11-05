@@ -4,6 +4,7 @@ import { logger } from './lib/logger.js';
 import healthRouter from './routes/health.js';
 import convertRouter from './routes/convert.js';
 import analyzeRouter from './routes/analyze.js';
+import migrateRouter from './routes/migrate.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,6 +24,7 @@ app.use((req, _res, next) => {
 app.use('/health', healthRouter);
 app.use('/api/convert', convertRouter);
 app.use('/api/analyze', analyzeRouter);
+app.use('/api/migrate', migrateRouter);
 
 // 404 handler
 app.use((_req, res) => {
