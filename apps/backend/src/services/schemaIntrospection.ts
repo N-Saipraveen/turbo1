@@ -53,7 +53,7 @@ export async function introspectDatabaseSchema(
 
 async function introspectPostgresSchema(
   pool: any,
-  database: string
+  _database: string
 ): Promise<TableSchema[]> {
   const client = await pool.connect();
 

@@ -1,5 +1,4 @@
 import { getDatabaseConnection, closeDatabaseConnection, type DatabaseConnection } from './dbConnection.js';
-import { type TableSchema } from './schemaIntrospection.js';
 import { EventEmitter } from 'events';
 
 export interface MigrationConfig {

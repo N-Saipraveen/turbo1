@@ -38,7 +38,7 @@ export async function previewJsonMigration(
       const schema = Object.values(result.artifacts).join('\n\n');
 
       // Generate sample inserts for preview
-      const sampleInserts = dataArray.slice(0, 5).map((record, i) =>
+      const sampleInserts = dataArray.slice(0, 5).map((record) =>
         `db.collection.insertOne(${JSON.stringify(record, null, 2)})`
       );
 
@@ -126,7 +126,7 @@ function estimateRowsPerTable(records: any[]): Array<{ table: string; estimatedR
 /**
  * Generate SQL INSERT statements from JSON data
  */
-function generateSqlInserts(records: any[], dialect: 'postgres' | 'mysql' | 'sqlite'): string[] {
+function generateSqlInserts(records: any[], _dialect: 'postgres' | 'mysql' | 'sqlite'): string[] {
   if (records.length === 0) return [];
 
   const tableName = 'main_table';
@@ -570,7 +570,7 @@ function analyzeDataStructure(records: any[]): {
           }
         }
       } else if (value && typeof value === 'object') {
-        // Nested object - becomes related table
+        // Nested object - becomes related table with FK to parent
         const relatedTableName = `main_table_${key}`;
 
         if (!relatedTables[relatedTableName]) {
@@ -578,11 +578,9 @@ function analyzeDataStructure(records: any[]): {
         }
 
         relatedTables[relatedTableName].push({
-          id: pkValue, // Use same id as parent for 1:1 relationship
+          main_table_id: pkValue, // FK to parent table
           ...value,
         });
-
-        // Don't add FK - related table has same PK
       } else {
         // Scalar value - stays in main table
         mainRecord[key] = value;

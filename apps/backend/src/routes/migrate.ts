@@ -120,7 +120,7 @@ router.post('/start-migration', async (req, res) => {
     });
 
     // Execute migration in background
-    migration.execute().then((result) => {
+    migration.execute().then((_result) => {
       setTimeout(() => {
         activeMigrations.delete(migrationId);
       }, 60000); // Keep for 1 minute after completion
@@ -199,6 +199,9 @@ router.get('/migration-stream/:id', (req, res) => {
     migration.off('log', logHandler);
     migration.off('progress', progressHandler);
   });
+
+  // SSE connection stays open
+  return;
 });
 
 // Preview JSON migration
