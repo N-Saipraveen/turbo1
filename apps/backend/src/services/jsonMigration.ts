@@ -9,7 +9,16 @@ export interface JsonMigrationPreview {
   sampleInserts?: string[];
   tableCount?: number;
   recordCount?: number;
+  tableSummary?: Array<{ table: string; estimatedRows: number }>;
   error?: string;
+}
+
+export interface MigrationProgress {
+  table: string;
+  current: number;
+  total: number;
+  percentage: number;
+  status: 'pending' | 'in_progress' | 'completed' | 'error';
 }
 
 /**
@@ -29,7 +38,7 @@ export async function previewJsonMigration(
       const schema = Object.values(result.artifacts).join('\n\n');
 
       // Generate sample inserts for preview
-      const sampleInserts = dataArray.slice(0, 5).map((record, i) =>
+      const sampleInserts = dataArray.slice(0, 5).map((record) =>
         `db.collection.insertOne(${JSON.stringify(record, null, 2)})`
       );
 
@@ -40,6 +49,7 @@ export async function previewJsonMigration(
         sampleInserts,
         tableCount: 1,
         recordCount: dataArray.length,
+        tableSummary: [{ table: 'main_collection', estimatedRows: dataArray.length }],
       };
     } else {
       // SQL targets (postgres, mysql, sqlite)
@@ -47,6 +57,9 @@ export async function previewJsonMigration(
 
       // Combine all SQL artifacts into a single schema string
       const schema = Object.values(result.artifacts).join('\n\n');
+
+      // Estimate rows per table
+      const tableSummary = estimateRowsPerTable(dataArray);
 
       // Generate sample INSERT statements for preview
       const sampleInserts = generateSqlInserts(dataArray.slice(0, 5), targetType);
@@ -58,6 +71,7 @@ export async function previewJsonMigration(
         sampleInserts,
         tableCount: Object.keys(result.artifacts).length,
         recordCount: dataArray.length,
+        tableSummary,
       };
     }
   } catch (error) {
@@ -69,9 +83,50 @@ export async function previewJsonMigration(
 }
 
 /**
+ * Estimate how many rows will be in each table after normalization
+ */
+function estimateRowsPerTable(records: any[]): Array<{ table: string; estimatedRows: number }> {
+  const summary: Array<{ table: string; estimatedRows: number }> = [];
+
+  if (records.length === 0) return summary;
+
+  // Main table
+  summary.push({ table: 'main_table', estimatedRows: records.length });
+
+  // Analyze first record for nested structures
+  const sample = records[0];
+
+  for (const key in sample) {
+    const value = sample[key];
+
+    // Array fields become child tables
+    if (Array.isArray(value)) {
+      const avgArrayLength = records.reduce((sum, r) => {
+        return sum + (Array.isArray(r[key]) ? r[key].length : 0);
+      }, 0) / records.length;
+
+      const estimatedRows = Math.ceil(avgArrayLength * records.length);
+      summary.push({
+        table: `main_table_${key}`,
+        estimatedRows,
+      });
+    }
+    // Nested objects become related tables
+    else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      summary.push({
+        table: `main_table_${key}`,
+        estimatedRows: records.length,
+      });
+    }
+  }
+
+  return summary;
+}
+
+/**
  * Generate SQL INSERT statements from JSON data
  */
-function generateSqlInserts(records: any[], dialect: 'postgres' | 'mysql' | 'sqlite'): string[] {
+function generateSqlInserts(records: any[], _dialect: 'postgres' | 'mysql' | 'sqlite'): string[] {
   if (records.length === 0) return [];
 
   const tableName = 'main_table';
@@ -97,63 +152,110 @@ function generateSqlInserts(records: any[], dialect: 'postgres' | 'mysql' | 'sql
 }
 
 /**
- * Execute JSON to database migration - ACTUAL DATA MIGRATION
+ * Execute JSON to database migration - COMPLETE DATA MIGRATION WITH NESTED STRUCTURES
  */
 export async function executeJsonMigration(
   jsonData: any,
   targetConnection: DatabaseConnection,
-  progressCallback?: (message: string, progress: number) => void
-): Promise<{ success: boolean; message: string; recordsInserted: number; errors?: string[] }> {
+  progressCallback?: (progress: MigrationProgress[]) => void
+): Promise<{
+  success: boolean;
+  message: string;
+  recordsInserted: number;
+  tableDetails: Array<{ table: string; rows: number }>;
+  errors?: string[]
+}> {
   const dataArray = Array.isArray(jsonData) ? jsonData : [jsonData];
   const errors: string[] = [];
   let connection: any = null;
+  const tableDetails: Array<{ table: string; rows: number }> = [];
+  let totalRecordsInserted = 0;
 
   try {
-    progressCallback?.('Connecting to target database...', 10);
-
     // Connect to target database
     connection = await getDatabaseConnection(targetConnection);
 
     if (targetConnection.type === 'mongodb') {
-      // MongoDB migration - insert documents directly
-      progressCallback?.('Creating MongoDB collection...', 30);
-
+      // MongoDB migration - insert documents directly (preserves nested structure)
       const db = connection.db(targetConnection.database || 'test');
       const collection = db.collection('main_collection');
 
-      progressCallback?.('Inserting documents...', 50);
+      const progress: MigrationProgress[] = [{
+        table: 'main_collection',
+        current: 0,
+        total: dataArray.length,
+        percentage: 0,
+        status: 'in_progress',
+      }];
+      progressCallback?.(progress);
 
-      // Insert all documents
+      // Insert all documents (MongoDB preserves nested objects and arrays naturally)
       const result = await collection.insertMany(dataArray);
 
-      progressCallback?.('Migration complete!', 100);
+      progress[0].current = result.insertedCount;
+      progress[0].percentage = 100;
+      progress[0].status = 'completed';
+      progressCallback?.(progress);
 
       return {
         success: true,
         message: `Successfully inserted ${result.insertedCount} documents into MongoDB`,
         recordsInserted: result.insertedCount,
+        tableDetails: [{ table: 'main_collection', rows: result.insertedCount }],
       };
     } else {
-      // SQL migration - execute CREATE and INSERT statements
-      progressCallback?.('Generating SQL schema...', 20);
-
+      // SQL migration - handle normalized schema with child/related tables
       const dialect = targetConnection.type as 'postgres' | 'mysql' | 'sqlite';
       const result = await convertJsonToSql(JSON.stringify(jsonData), dialect);
 
       // Extract CREATE TABLE statements from artifacts
       const createStatements = Object.values(result.artifacts);
 
-      progressCallback?.('Creating tables...', 30);
+      // Analyze the data structure to understand relationships
+      const { mainTableData, childTables, relatedTables } = analyzeDataStructure(dataArray);
+
+      // Initialize progress tracking
+      const progressMap = new Map<string, MigrationProgress>();
+      progressMap.set('main_table', {
+        table: 'main_table',
+        current: 0,
+        total: mainTableData.length,
+        percentage: 0,
+        status: 'pending',
+      });
+
+      for (const [tableName, data] of Object.entries(childTables)) {
+        progressMap.set(tableName, {
+          table: tableName,
+          current: 0,
+          total: data.length,
+          percentage: 0,
+          status: 'pending',
+        });
+      }
+
+      for (const [tableName, data] of Object.entries(relatedTables)) {
+        progressMap.set(tableName, {
+          table: tableName,
+          current: 0,
+          total: data.length,
+          percentage: 0,
+          status: 'pending',
+        });
+      }
+
+      const updateProgress = () => {
+        progressCallback?.(Array.from(progressMap.values()));
+      };
 
       // Execute CREATE TABLE statements
       if (dialect === 'postgres') {
-        // PostgreSQL
         const client = await connection.connect();
 
         try {
           await client.query('BEGIN');
 
-          // Execute CREATE statements
+          // Create tables
           for (const createStmt of createStatements) {
             const statements = createStmt.split(';').filter(s => s.trim());
             for (const stmt of statements) {
@@ -163,20 +265,85 @@ export async function executeJsonMigration(
             }
           }
 
-          progressCallback?.('Inserting data...', 50);
+          // Insert main table data
+          progressMap.get('main_table')!.status = 'in_progress';
+          updateProgress();
 
-          // Generate and execute INSERT statements
-          const inserted = await insertRecordsPostgres(client, dataArray, progressCallback);
+          const mainInserted = await insertRecordsPostgres(
+            client,
+            mainTableData,
+            'main_table',
+            (current) => {
+              const progress = progressMap.get('main_table')!;
+              progress.current = current;
+              progress.percentage = Math.floor((current / progress.total) * 100);
+              updateProgress();
+            }
+          );
+
+          progressMap.get('main_table')!.status = 'completed';
+          tableDetails.push({ table: 'main_table', rows: mainInserted });
+          totalRecordsInserted += mainInserted;
+          updateProgress();
+
+          // Insert child table data (arrays)
+          for (const [tableName, records] of Object.entries(childTables)) {
+            if (progressMap.has(tableName)) {
+              progressMap.get(tableName)!.status = 'in_progress';
+              updateProgress();
+
+              const inserted = await insertRecordsPostgres(
+                client,
+                records,
+                tableName,
+                (current) => {
+                  const progress = progressMap.get(tableName)!;
+                  progress.current = current;
+                  progress.percentage = Math.floor((current / progress.total) * 100);
+                  updateProgress();
+                }
+              );
+
+              progressMap.get(tableName)!.status = 'completed';
+              tableDetails.push({ table: tableName, rows: inserted });
+              totalRecordsInserted += inserted;
+              updateProgress();
+            }
+          }
+
+          // Insert related table data (nested objects)
+          for (const [tableName, records] of Object.entries(relatedTables)) {
+            if (progressMap.has(tableName)) {
+              progressMap.get(tableName)!.status = 'in_progress';
+              updateProgress();
+
+              const inserted = await insertRecordsPostgres(
+                client,
+                records,
+                tableName,
+                (current) => {
+                  const progress = progressMap.get(tableName)!;
+                  progress.current = current;
+                  progress.percentage = Math.floor((current / progress.total) * 100);
+                  updateProgress();
+                }
+              );
+
+              progressMap.get(tableName)!.status = 'completed';
+              tableDetails.push({ table: tableName, rows: inserted });
+              totalRecordsInserted += inserted;
+              updateProgress();
+            }
+          }
 
           await client.query('COMMIT');
           client.release();
 
-          progressCallback?.('Migration complete!', 100);
-
           return {
             success: true,
-            message: `Successfully migrated ${inserted} records to PostgreSQL`,
-            recordsInserted: inserted,
+            message: `Successfully migrated ${totalRecordsInserted} total records across ${tableDetails.length} tables to PostgreSQL`,
+            recordsInserted: totalRecordsInserted,
+            tableDetails,
           };
         } catch (error) {
           await client.query('ROLLBACK');
@@ -184,13 +351,12 @@ export async function executeJsonMigration(
           throw error;
         }
       } else if (dialect === 'mysql') {
-        // MySQL
         const mysqlConnection = await connection.getConnection();
 
         try {
           await mysqlConnection.beginTransaction();
 
-          // Execute CREATE statements
+          // Create tables
           for (const createStmt of createStatements) {
             const statements = createStmt.split(';').filter(s => s.trim());
             for (const stmt of statements) {
@@ -200,20 +366,60 @@ export async function executeJsonMigration(
             }
           }
 
-          progressCallback?.('Inserting data...', 50);
+          // Insert main table data
+          progressMap.get('main_table')!.status = 'in_progress';
+          updateProgress();
 
-          // Generate and execute INSERT statements
-          const inserted = await insertRecordsMysql(mysqlConnection, dataArray, progressCallback);
+          const mainInserted = await insertRecordsMysql(
+            mysqlConnection,
+            mainTableData,
+            'main_table',
+            (current) => {
+              const progress = progressMap.get('main_table')!;
+              progress.current = current;
+              progress.percentage = Math.floor((current / progress.total) * 100);
+              updateProgress();
+            }
+          );
+
+          progressMap.get('main_table')!.status = 'completed';
+          tableDetails.push({ table: 'main_table', rows: mainInserted });
+          totalRecordsInserted += mainInserted;
+          updateProgress();
+
+          // Insert child and related tables
+          for (const [tableName, records] of Object.entries({...childTables, ...relatedTables})) {
+            if (progressMap.has(tableName)) {
+              progressMap.get(tableName)!.status = 'in_progress';
+              updateProgress();
+
+              const inserted = await insertRecordsMysql(
+                mysqlConnection,
+                records,
+                tableName,
+                (current) => {
+                  const progress = progressMap.get(tableName)!;
+                  progress.current = current;
+                  progress.percentage = Math.floor((current / progress.total) * 100);
+                  updateProgress();
+                }
+              );
+
+              progressMap.get(tableName)!.status = 'completed';
+              tableDetails.push({ table: tableName, rows: inserted });
+              totalRecordsInserted += inserted;
+              updateProgress();
+            }
+          }
 
           await mysqlConnection.commit();
           mysqlConnection.release();
 
-          progressCallback?.('Migration complete!', 100);
-
           return {
             success: true,
-            message: `Successfully migrated ${inserted} records to MySQL`,
-            recordsInserted: inserted,
+            message: `Successfully migrated ${totalRecordsInserted} total records across ${tableDetails.length} tables to MySQL`,
+            recordsInserted: totalRecordsInserted,
+            tableDetails,
           };
         } catch (error) {
           await mysqlConnection.rollback();
@@ -225,7 +431,7 @@ export async function executeJsonMigration(
         try {
           connection.exec('BEGIN TRANSACTION');
 
-          // Execute CREATE statements
+          // Create tables
           for (const createStmt of createStatements) {
             const statements = createStmt.split(';').filter(s => s.trim());
             for (const stmt of statements) {
@@ -235,19 +441,59 @@ export async function executeJsonMigration(
             }
           }
 
-          progressCallback?.('Inserting data...', 50);
+          // Insert main table data
+          progressMap.get('main_table')!.status = 'in_progress';
+          updateProgress();
 
-          // Generate and execute INSERT statements
-          const inserted = await insertRecordsSqlite(connection, dataArray, progressCallback);
+          const mainInserted = await insertRecordsSqlite(
+            connection,
+            mainTableData,
+            'main_table',
+            (current) => {
+              const progress = progressMap.get('main_table')!;
+              progress.current = current;
+              progress.percentage = Math.floor((current / progress.total) * 100);
+              updateProgress();
+            }
+          );
+
+          progressMap.get('main_table')!.status = 'completed';
+          tableDetails.push({ table: 'main_table', rows: mainInserted });
+          totalRecordsInserted += mainInserted;
+          updateProgress();
+
+          // Insert child and related tables
+          for (const [tableName, records] of Object.entries({...childTables, ...relatedTables})) {
+            if (progressMap.has(tableName)) {
+              progressMap.get(tableName)!.status = 'in_progress';
+              updateProgress();
+
+              const inserted = await insertRecordsSqlite(
+                connection,
+                records,
+                tableName,
+                (current) => {
+                  const progress = progressMap.get(tableName)!;
+                  progress.current = current;
+                  progress.percentage = Math.floor((current / progress.total) * 100);
+                  updateProgress();
+                }
+              );
+
+              progressMap.get(tableName)!.status = 'completed';
+              tableDetails.push({ table: tableName, rows: inserted });
+              totalRecordsInserted += inserted;
+              updateProgress();
+            }
+          }
 
           connection.exec('COMMIT');
 
-          progressCallback?.('Migration complete!', 100);
-
           return {
             success: true,
-            message: `Successfully migrated ${inserted} records to SQLite`,
-            recordsInserted: inserted,
+            message: `Successfully migrated ${totalRecordsInserted} total records across ${tableDetails.length} tables to SQLite`,
+            recordsInserted: totalRecordsInserted,
+            tableDetails,
           };
         } catch (error) {
           connection.exec('ROLLBACK');
@@ -263,6 +509,7 @@ export async function executeJsonMigration(
       success: false,
       message: errorMsg,
       recordsInserted: 0,
+      tableDetails: [],
       errors,
     };
   } finally {
@@ -278,19 +525,88 @@ export async function executeJsonMigration(
 }
 
 /**
+ * Analyze data structure and extract data for each table
+ */
+function analyzeDataStructure(records: any[]): {
+  mainTableData: any[];
+  childTables: Record<string, any[]>;
+  relatedTables: Record<string, any[]>;
+} {
+  const mainTableData: any[] = [];
+  const childTables: Record<string, any[]> = {};
+  const relatedTables: Record<string, any[]> = {};
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const mainRecord: any = {};
+
+    // Get the primary key value from the record (usually 'id')
+    const pkValue = record.id !== undefined ? record.id : (i + 1);
+
+    for (const key in record) {
+      const value = record[key];
+
+      if (Array.isArray(value)) {
+        // Array field - becomes child table
+        const childTableName = `main_table_${key}`;
+
+        if (!childTables[childTableName]) {
+          childTables[childTableName] = [];
+        }
+
+        // Each array element becomes a row with FK to parent
+        for (const item of value) {
+          if (typeof item === 'object' && item !== null) {
+            childTables[childTableName].push({
+              parent_id: pkValue,
+              ...item,
+            });
+          } else {
+            // Primitive array values
+            childTables[childTableName].push({
+              parent_id: pkValue,
+              value: item,
+            });
+          }
+        }
+      } else if (value && typeof value === 'object') {
+        // Nested object - becomes related table with FK to parent
+        const relatedTableName = `main_table_${key}`;
+
+        if (!relatedTables[relatedTableName]) {
+          relatedTables[relatedTableName] = [];
+        }
+
+        relatedTables[relatedTableName].push({
+          main_table_id: pkValue, // FK to parent table
+          ...value,
+        });
+      } else {
+        // Scalar value - stays in main table
+        mainRecord[key] = value;
+      }
+    }
+
+    mainTableData.push(mainRecord);
+  }
+
+  return { mainTableData, childTables, relatedTables };
+}
+
+/**
  * Insert records into PostgreSQL
  */
 async function insertRecordsPostgres(
   client: any,
   records: any[],
-  progressCallback?: (message: string, progress: number) => void
+  tableName: string,
+  progressCallback?: (current: number) => void
 ): Promise<number> {
   let inserted = 0;
-  const tableName = 'main_table';
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
-    const columns = Object.keys(record).filter(key => !Array.isArray(record[key]) && typeof record[key] !== 'object');
+    const columns = Object.keys(record);
 
     if (columns.length === 0) continue;
 
@@ -302,10 +618,7 @@ async function insertRecordsPostgres(
 
     await client.query(insertSql, values);
     inserted++;
-
-    // Update progress
-    const progress = 50 + Math.floor((i / records.length) * 50);
-    progressCallback?.(`Inserted ${inserted}/${records.length} records`, progress);
+    progressCallback?.(inserted);
   }
 
   return inserted;
@@ -317,14 +630,14 @@ async function insertRecordsPostgres(
 async function insertRecordsMysql(
   connection: any,
   records: any[],
-  progressCallback?: (message: string, progress: number) => void
+  tableName: string,
+  progressCallback?: (current: number) => void
 ): Promise<number> {
   let inserted = 0;
-  const tableName = 'main_table';
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
-    const columns = Object.keys(record).filter(key => !Array.isArray(record[key]) && typeof record[key] !== 'object');
+    const columns = Object.keys(record);
 
     if (columns.length === 0) continue;
 
@@ -336,10 +649,7 @@ async function insertRecordsMysql(
 
     await connection.query(insertSql, values);
     inserted++;
-
-    // Update progress
-    const progress = 50 + Math.floor((i / records.length) * 50);
-    progressCallback?.(`Inserted ${inserted}/${records.length} records`, progress);
+    progressCallback?.(inserted);
   }
 
   return inserted;
@@ -351,14 +661,14 @@ async function insertRecordsMysql(
 async function insertRecordsSqlite(
   db: any,
   records: any[],
-  progressCallback?: (message: string, progress: number) => void
+  tableName: string,
+  progressCallback?: (current: number) => void
 ): Promise<number> {
   let inserted = 0;
-  const tableName = 'main_table';
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
-    const columns = Object.keys(record).filter(key => !Array.isArray(record[key]) && typeof record[key] !== 'object');
+    const columns = Object.keys(record);
 
     if (columns.length === 0) continue;
 
@@ -371,10 +681,7 @@ async function insertRecordsSqlite(
     const stmt = db.prepare(insertSql);
     stmt.run(...values);
     inserted++;
-
-    // Update progress
-    const progress = 50 + Math.floor((i / records.length) * 50);
-    progressCallback?.(`Inserted ${inserted}/${records.length} records`, progress);
+    progressCallback?.(inserted);
   }
 
   return inserted;

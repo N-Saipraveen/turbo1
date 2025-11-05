@@ -139,12 +139,21 @@ function analyzeAndNormalizeSchema(
 
     // Check if it's an array
     if (Array.isArray(value)) {
+      const childTableName = `${mainTableName}_${sanitizeSqlIdentifier(fieldName)}`;
+
       if (value.length > 0 && typeof value[0] === 'object') {
         // Create child table for array of objects
-        const childTableName = `${mainTableName}_${sanitizeSqlIdentifier(fieldName)}`;
         const childTable = createChildTable(
           childTableName,
           value[0],
+          mainTableName,
+          dialect
+        );
+        tables.push(childTable);
+      } else if (value.length > 0) {
+        // Create child table for array of primitives
+        const childTable = createPrimitiveArrayTable(
+          childTableName,
           mainTableName,
           dialect
         );
@@ -285,6 +294,50 @@ function createChildTable(
   return table;
 }
 
+function createPrimitiveArrayTable(
+  tableName: string,
+  parentTableName: string,
+  dialect: 'postgres' | 'mysql' | 'sqlite'
+): TableDefinition {
+  const table: TableDefinition = {
+    name: tableName,
+    columns: [],
+    foreignKeys: [],
+    uniqueConstraints: [],
+  };
+
+  // Add auto-increment PK
+  table.columns.push({
+    name: 'id',
+    type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
+    nullable: false,
+    isPrimaryKey: true,
+  });
+
+  // Add foreign key to parent
+  const parentIdColumn = 'parent_id';
+  table.columns.push({
+    name: parentIdColumn,
+    type: 'INT',
+    nullable: false,
+  });
+
+  table.foreignKeys.push({
+    column: parentIdColumn,
+    referencedTable: parentTableName,
+    referencedColumn: 'id',
+  });
+
+  // Add value column for primitive values
+  table.columns.push({
+    name: 'value',
+    type: 'VARCHAR(255)',
+    nullable: false,
+  });
+
+  return table;
+}
+
 function inferSqlType(
   fieldName: string,
   value: any,
@@ -380,7 +433,7 @@ function inferSqlType(
   }
 }
 
-function isUniqueField(fieldName: string, value: any): boolean {
+function isUniqueField(fieldName: string, _value: any): boolean {
   const lowerName = fieldName.toLowerCase();
 
   if (
