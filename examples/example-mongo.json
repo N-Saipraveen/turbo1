@@ -1,0 +1,59 @@
+[
+  {
+    "_collection": "users",
+    "_id": "507f1f77bcf86cd799439011",
+    "email": "john.doe@example.com",
+    "username": "johndoe",
+    "passwordHash": "$2b$10$...",
+    "profile": {
+      "firstName": "John",
+      "lastName": "Doe",
+      "age": 30,
+      "bio": "Software developer and tech enthusiast"
+    },
+    "roles": ["user", "admin"],
+    "isActive": true,
+    "preferences": {
+      "theme": "dark",
+      "notifications": true,
+      "language": "en"
+    },
+    "addresses": [
+      {
+        "type": "home",
+        "street": "123 Main St",
+        "city": "San Francisco",
+        "state": "CA",
+        "zipCode": "94102",
+        "country": "USA"
+      }
+    ],
+    "orders": [
+      {
+        "orderId": "ORD-001",
+        "total": 99.99,
+        "status": "delivered",
+        "items": [
+          {
+            "productId": "PROD-123",
+            "name": "Wireless Mouse",
+            "quantity": 2,
+            "price": 29.99
+          },
+          {
+            "productId": "PROD-456",
+            "name": "USB Cable",
+            "quantity": 1,
+            "price": 9.99
+          }
+        ]
+      }
+    ],
+    "createdAt": {
+      "$date": "2024-01-15T10:30:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2024-01-20T14:22:00.000Z"
+    }
+  }
+]

@@ -1,0 +1,108 @@
+export interface MongoSchemaDefinition {
+  collection: string;
+  fields: MongoField[];
+  indexes?: MongoIndex[];
+  validationRules?: any;
+}
+
+export interface MongoField {
+  name: string;
+  type: string;
+  required: boolean;
+  isArray?: boolean;
+  nested?: MongoField[];
+}
+
+export interface MongoIndex {
+  name: string;
+  fields: Record<string, 1 | -1>;
+  unique?: boolean;
+}
+
+export function inferMongoSchema(documents: any[]): MongoSchemaDefinition[] {
+  if (!Array.isArray(documents) || documents.length === 0) {
+    throw new Error('Documents must be a non-empty array');
+  }
+
+  // Sample the first document to infer structure
+  const sampleDoc = documents[0];
+  const collectionName = sampleDoc._collection || 'collection';
+
+  const fields = inferFieldsFromDocument(sampleDoc);
+
+  return [{
+    collection: collectionName,
+    fields,
+  }];
+}
+
+function inferFieldsFromDocument(doc: any, _parentKey = ''): MongoField[] {
+  const fields: MongoField[] = [];
+
+  for (const [key, value] of Object.entries(doc)) {
+    if (key === '_id' || key === '_collection') continue;
+
+    const field: MongoField = {
+      name: key,
+      type: inferMongoType(value),
+      required: value !== null && value !== undefined,
+    };
+
+    if (Array.isArray(value)) {
+      field.isArray = true;
+      if (value.length > 0 && typeof value[0] === 'object') {
+        field.nested = inferFieldsFromDocument(value[0]);
+      }
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      field.nested = inferFieldsFromDocument(value);
+    }
+
+    fields.push(field);
+  }
+
+  return fields;
+}
+
+function inferMongoType(value: any): string {
+  if (value === null || value === undefined) {
+    return 'mixed';
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0 ? inferMongoType(value[0]) : 'array';
+  }
+
+  if (value instanceof Date) {
+    return 'date';
+  }
+
+  switch (typeof value) {
+    case 'string':
+      return 'string';
+    case 'number':
+      return Number.isInteger(value) ? 'int' : 'double';
+    case 'boolean':
+      return 'bool';
+    case 'object':
+      return 'object';
+    default:
+      return 'mixed';
+  }
+}
+
+export function parseMongoSchema(content: string): MongoSchemaDefinition[] {
+  try {
+    const data = JSON.parse(content);
+
+    if (Array.isArray(data)) {
+      return inferMongoSchema(data);
+    } else if (typeof data === 'object') {
+      // Single document
+      return inferMongoSchema([data]);
+    } else {
+      throw new Error('Invalid MongoDB data format');
+    }
+  } catch (error) {
+    throw new Error(`MongoDB schema parsing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
