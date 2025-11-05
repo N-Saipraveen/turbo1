@@ -172,6 +172,7 @@ export interface JsonMigrationPreview {
   sampleInserts?: string[];
   tableCount?: number;
   recordCount?: number;
+  tableSummary?: Array<{ table: string; estimatedRows: number }>;
   error?: string;
 }
 
@@ -189,7 +190,13 @@ export const previewJsonMigration = async (
 export const executeJsonMigration = async (
   jsonData: any,
   targetConnection: DatabaseConnection
-): Promise<{ success: boolean; message: string; recordsInserted: number; errors?: string[] }> => {
+): Promise<{
+  success: boolean;
+  message: string;
+  recordsInserted: number;
+  tableDetails: Array<{ table: string; rows: number }>;
+  errors?: string[];
+}> => {
   const response = await api.post('/api/migrate/execute-json-migration', {
     jsonData,
     targetConnection,
