@@ -63,6 +63,7 @@ export default function Migrate() {
   const [migrating, setMigrating] = useState(false);
   const [migrationComplete, setMigrationComplete] = useState(false);
   const [migrationResult, setMigrationResult] = useState<string>('');
+  const [recordsInserted, setRecordsInserted] = useState<number>(0);
 
   // Handle source type change
   const handleSourceTypeChange = (type: string) => {
@@ -170,7 +171,8 @@ export default function Migrate() {
       if (result.success) {
         setMigrationComplete(true);
         setMigrationResult(result.message);
-        toast.success('Migration completed!');
+        setRecordsInserted(result.recordsInserted);
+        toast.success(`Migration completed! ${result.recordsInserted} records inserted.`);
       } else {
         toast.error(result.message);
       }
@@ -576,6 +578,25 @@ export default function Migrate() {
                           {preview.schema}
                         </pre>
                       </div>
+
+                      {preview.sampleInserts && preview.sampleInserts.length > 0 && (
+                        <div>
+                          <Label className="text-lg font-semibold mb-2">
+                            Sample INSERT Statements (First 5 Records)
+                          </Label>
+                          <pre className="rounded-xl bg-gray-900 p-6 text-sm text-blue-400 overflow-auto max-h-64">
+                            {preview.sampleInserts.join('\n\n')}
+                          </pre>
+                        </div>
+                      )}
+
+                      <div className="rounded-xl bg-blue-50 border border-blue-200 p-4">
+                        <p className="text-sm text-blue-800">
+                          ✅ <strong>Ready to migrate:</strong> This will create {preview.tableCount}{' '}
+                          {preview.tableCount === 1 ? 'table' : 'tables'} and insert{' '}
+                          {preview.recordCount} records into your {targetType.toUpperCase()} database.
+                        </p>
+                      </div>
                     </div>
                   )}
                 </CardContent>
@@ -597,11 +618,17 @@ export default function Migrate() {
                     <Play className="h-6 w-6 text-green-500" />
                     Step 4: Execute Migration
                   </CardTitle>
-                  <CardDescription>Run the migration to target database</CardDescription>
+                  <CardDescription>Create tables and insert all data into target database</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {!migrationComplete ? (
-                    <div className="text-center py-12">
+                    <div className="text-center py-12 space-y-4">
+                      <div className="rounded-xl bg-yellow-50 border border-yellow-200 p-4 max-w-md mx-auto">
+                        <p className="text-sm text-yellow-800">
+                          ⚠️ <strong>Ready to execute:</strong> This will create tables and insert{' '}
+                          {preview?.recordCount || 0} records into your target database.
+                        </p>
+                      </div>
                       <Button
                         onClick={handleRunMigration}
                         disabled={migrating}
@@ -611,12 +638,12 @@ export default function Migrate() {
                         {migrating ? (
                           <>
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Migrating...
+                            Creating Tables & Inserting Data...
                           </>
                         ) : (
                           <>
                             <Play className="mr-2 h-5 w-5" />
-                            Run Migration
+                            Execute Migration Now
                           </>
                         )}
                       </Button>
@@ -631,6 +658,12 @@ export default function Migrate() {
                         <CheckCircle2 className="h-12 w-12 text-white" />
                       </div>
                       <h3 className="text-2xl font-bold text-green-700">Migration Complete!</h3>
+                      <div className="rounded-xl bg-green-50 border border-green-200 p-4 max-w-md mx-auto">
+                        <div className="text-center space-y-2">
+                          <div className="text-4xl font-bold text-green-700">{recordsInserted}</div>
+                          <div className="text-sm text-green-600">Records Successfully Inserted</div>
+                        </div>
+                      </div>
                       <p className="text-gray-600">{migrationResult}</p>
                       {preview?.schema && (
                         <Button
