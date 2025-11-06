@@ -51,18 +51,29 @@ function generateSqlFromMongoSchema(
 
   let ddl = `CREATE TABLE ${quotedTableName} (\n`;
 
-  // Add ID column
-  if (dialect === 'postgres') {
-    ddl += `  ${quoteIdentifier('id', dialect)} SERIAL PRIMARY KEY,\n`;
-  } else if (dialect === 'mysql') {
-    ddl += `  ${quoteIdentifier('id', dialect)} INT AUTO_INCREMENT PRIMARY KEY,\n`;
-  } else {
-    ddl += `  ${quoteIdentifier('id', dialect)} INTEGER PRIMARY KEY AUTOINCREMENT,\n`;
-  }
-
   const columns: string[] = [];
 
+  // Check if schema has _id field from MongoDB
+  const hasMongoId = schema.fields.some(f => f.name === '_id');
+
+  if (hasMongoId) {
+    // Use MongoDB _id as primary key (TEXT type to store ObjectId string)
+    ddl += `  ${quoteIdentifier('_id', dialect)} TEXT PRIMARY KEY,\n`;
+  } else {
+    // Fall back to auto-increment ID if no _id field
+    if (dialect === 'postgres') {
+      ddl += `  ${quoteIdentifier('id', dialect)} SERIAL PRIMARY KEY,\n`;
+    } else if (dialect === 'mysql') {
+      ddl += `  ${quoteIdentifier('id', dialect)} INT AUTO_INCREMENT PRIMARY KEY,\n`;
+    } else {
+      ddl += `  ${quoteIdentifier('id', dialect)} INTEGER PRIMARY KEY AUTOINCREMENT,\n`;
+    }
+  }
+
   for (const field of schema.fields) {
+    // Skip _id since we already added it as primary key
+    if (field.name === '_id') continue;
+
     const columnDef = generateColumnFromMongoField(field, dialect, warnings);
     if (columnDef) {
       columns.push(columnDef);
