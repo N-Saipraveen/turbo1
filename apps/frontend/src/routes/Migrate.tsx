@@ -438,14 +438,24 @@ export default function Migrate() {
                       onValueChange={(value) => {
                         setTargetType(value as any);
                         setTargetConnected(false);
-                        setTargetConn({
-                          type: value as any,
-                          host: '',
-                          port: value === 'mysql' ? 3306 : 5432,
-                          database: '',
-                          username: '',
-                          password: '',
-                        });
+
+                        if (value === 'mongodb') {
+                          // MongoDB uses URI-based connection
+                          setTargetConn({
+                            type: 'mongodb',
+                            uri: '',
+                            database: '',
+                          });
+                        } else {
+                          setTargetConn({
+                            type: value as any,
+                            host: '',
+                            port: value === 'mysql' ? 3306 : 5432,
+                            database: '',
+                            username: '',
+                            password: '',
+                          });
+                        }
                       }}
                     >
                       <SelectTrigger className="rounded-xl">
@@ -474,15 +484,29 @@ export default function Migrate() {
                         />
                       </div>
                     ) : targetType === 'mongodb' ? (
-                      <div>
-                        <Label>Connection URI</Label>
-                        <Input
-                          placeholder="mongodb://localhost:27017/database"
-                          value={targetConn.uri || ''}
-                          onChange={(e) => setTargetConn({ ...targetConn, uri: e.target.value })}
-                          className="rounded-xl"
-                        />
-                      </div>
+                      <>
+                        <div>
+                          <Label>MongoDB Connection URI</Label>
+                          <Input
+                            placeholder="mongodb+srv://username:password@cluster.mongodb.net"
+                            value={targetConn.uri || ''}
+                            onChange={(e) => setTargetConn({ ...targetConn, uri: e.target.value })}
+                            className="rounded-xl font-mono text-sm"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Use your full MongoDB connection string including credentials
+                          </p>
+                        </div>
+                        <div>
+                          <Label>Database Name</Label>
+                          <Input
+                            placeholder="myDatabase"
+                            value={targetConn.database}
+                            onChange={(e) => setTargetConn({ ...targetConn, database: e.target.value })}
+                            className="rounded-xl"
+                          />
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div className="grid grid-cols-2 gap-4">
