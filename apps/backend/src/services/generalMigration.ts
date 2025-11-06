@@ -3,6 +3,60 @@ import { previewJsonMigration, executeJsonMigration } from './jsonMigration.js';
 import { introspectDatabaseSchema, type TableSchema } from './schemaIntrospection.js';
 import { convertJsonToSql } from './jsonToSql.js';
 import { convertJsonToMongo } from './jsonToMongo.js';
+import { randomUUID } from 'crypto';
+
+/**
+ * Normalizes MongoDB documents for SQL insertion
+ * - Converts ObjectId _id to string
+ * - Generates UUID if _id is missing
+ * - Ensures _id is never null or undefined
+ */
+function normalizeMongoDocument(doc: any): any {
+  const copy = { ...doc };
+
+  // Handle _id field
+  if (copy._id) {
+    // Check if it's a MongoDB ObjectId (has toString method)
+    if (typeof copy._id === 'object' && copy._id.toString) {
+      copy._id = copy._id.toString();
+    }
+    // Check if it's a BSON ObjectId format { $oid: "..." }
+    else if (typeof copy._id === 'object' && copy._id.$oid) {
+      copy._id = copy._id.$oid;
+    }
+    // If it's already a string, keep it
+    else if (typeof copy._id !== 'string') {
+      // Convert to string representation
+      copy._id = String(copy._id);
+    }
+  } else {
+    // Auto-generate UUID if _id is missing
+    copy._id = randomUUID();
+  }
+
+  // Handle nested ObjectIds in other fields
+  for (const key in copy) {
+    if (key !== '_id' && copy[key] && typeof copy[key] === 'object') {
+      // Check if it's an ObjectId
+      if (copy[key].toString && !Array.isArray(copy[key])) {
+        copy[key] = copy[key].toString();
+      }
+      // Handle $oid format
+      else if (copy[key].$oid) {
+        copy[key] = copy[key].$oid;
+      }
+    }
+  }
+
+  return copy;
+}
+
+/**
+ * Normalizes an array of MongoDB documents
+ */
+function normalizeMongoDocuments(docs: any[]): any[] {
+  return docs.map(doc => normalizeMongoDocument(doc));
+}
 
 export interface MigrationPreview {
   success: boolean;
@@ -368,10 +422,22 @@ async function migrateToSQL(
   sourceType: string,
   targetConnection: DatabaseConnection
 ): Promise<MigrationResult> {
+  // Normalize MongoDB documents if source is MongoDB
+  let normalizedData = sourceData;
+  if (sourceType === 'mongodb') {
+    normalizedData = {
+      ...sourceData,
+      tables: sourceData.tables.map(table => ({
+        ...table,
+        rows: normalizeMongoDocuments(table.rows),
+      })),
+    };
+  }
+
   // Convert source data to JSON, then use existing JSON→SQL migration
-  const jsonData = sourceData.tables.length === 1
-    ? sourceData.tables[0].rows
-    : sourceData.tables.reduce((acc, table) => {
+  const jsonData = normalizedData.tables.length === 1
+    ? normalizedData.tables[0].rows
+    : normalizedData.tables.reduce((acc, table) => {
         acc[table.name] = table.rows;
         return acc;
       }, {} as any);
