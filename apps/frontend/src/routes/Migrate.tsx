@@ -76,7 +76,15 @@ export default function Migrate() {
 
     if (type === 'json') {
       setSourceConn({ type: 'json' });
+    } else if (type === 'mongodb') {
+      // MongoDB uses URI-based connection
+      setSourceConn({
+        type: 'mongodb',
+        uri: '',
+        database: '',
+      });
     } else {
+      // SQL databases use host/port/username/password
       setSourceConn({
         type: type as any,
         host: '',
@@ -300,6 +308,40 @@ export default function Migrate() {
 
                   {sourceType === 'json' ? (
                     <FileUpload onFileUpload={handleJsonUpload} />
+                  ) : sourceType === 'mongodb' ? (
+                    <div className="space-y-4">
+                      <div>
+                        <Label>MongoDB Connection URI</Label>
+                        <Input
+                          placeholder="mongodb+srv://username:password@cluster.mongodb.net"
+                          value={sourceConn.uri || ''}
+                          onChange={(e) =>
+                            setSourceConn({ ...sourceConn, uri: e.target.value })
+                          }
+                          className="rounded-xl font-mono text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Use your full MongoDB connection string including credentials
+                        </p>
+                      </div>
+                      <div>
+                        <Label>Database Name</Label>
+                        <Input
+                          placeholder="myDatabase"
+                          value={sourceConn.database}
+                          onChange={(e) =>
+                            setSourceConn({ ...sourceConn, database: e.target.value })
+                          }
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <Button
+                        onClick={handleTestSourceConnection}
+                        className="w-full rounded-xl bg-gradient-to-r from-purple-500 to-pink-500"
+                      >
+                        Test Connection
+                      </Button>
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
