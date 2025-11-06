@@ -21,8 +21,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
 import { convertSchema, analyzeSchema, type ConvertRequest, type ConvertResponse } from '@/lib/api';
+import { SchemaEditor } from '@/components/SchemaEditor';
 
 export default function Convert() {
   const [from, setFrom] = useState<'sql' | 'mongo' | 'json'>('json');
@@ -37,12 +37,42 @@ export default function Convert() {
   const [fullscreen, setFullscreen] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [isMongoShell, setIsMongoShell] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
+
+  // Detect MongoDB Shell syntax
+  const detectMongoShell = (text: string): boolean => {
+    const patterns = [
+      /db\.createCollection/,
+      /db\.\w+\.insert/,
+      /db\.\w+\.find/,
+      /\/\//,  // Comments
+      /\/\*/,  // Multi-line comments
+      /ObjectId\(/,
+      /ISODate\(/,
+    ];
+    return patterns.some(pattern => pattern.test(text));
+  };
+
+  // Handle content change with MongoDB Shell detection
+  const handleContentChange = (newContent: string) => {
+    setContent(newContent);
+    if (from === 'mongo') {
+      setIsMongoShell(detectMongoShell(newContent));
+    }
+  };
+
+  // Get editor language based on source format
+  const getEditorLanguage = (): 'javascript' | 'sql' | 'json' => {
+    if (from === 'mongo') return 'javascript';
+    if (from === 'sql') return 'sql';
+    return 'json';
+  };
 
   const detectFileFormat = (filename: string): 'sql' | 'mongo' | 'json' | null => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -300,12 +330,25 @@ export default function Convert() {
 
                 <div>
                   <Label>Schema Content</Label>
-                  <Textarea
-                    placeholder="Paste your schema here or upload a file..."
-                    className="min-h-[400px] font-mono text-xs mt-2"
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                  />
+                  <div className="mt-2">
+                    <SchemaEditor
+                      value={content}
+                      onChange={handleContentChange}
+                      language={getEditorLanguage()}
+                      height="400px"
+                      placeholder="Paste your schema here or upload a file..."
+                    />
+                  </div>
+                  {isMongoShell && from === 'mongo' && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
+                      <div className="flex items-start gap-2">
+                        <span className="font-semibold">ℹ️ MongoDB Shell syntax detected</span>
+                      </div>
+                      <p className="mt-1 text-xs">
+                        Comments, createCollection commands, and MongoDB-specific syntax (ObjectId, ISODate) are supported and will be automatically preprocessed.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between pt-2">
