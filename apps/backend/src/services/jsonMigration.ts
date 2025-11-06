@@ -654,8 +654,22 @@ export async function executeJsonMigration(
 }
 
 /**
- * Insert parent record and return the generated ID (PostgreSQL)
- * Uses RETURNING id to capture the auto-generated primary key
+ * Detect PK field name from column list
+ */
+function detectPKFromColumns(columns: string[]): string | null {
+  const pkCandidates = ['id', '_id', 'uuid', 'ID', 'Id', 'UUID'];
+  for (const candidate of pkCandidates) {
+    if (columns.includes(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * Insert parent record and return the primary key value (PostgreSQL)
+ * If record has existing PK, inserts it and returns that value
+ * If no PK, uses RETURNING to capture auto-generated ID
  */
 async function insertParentRecordPostgres(
   client: any,
@@ -664,17 +678,21 @@ async function insertParentRecordPostgres(
   values: any[]
 ): Promise<number> {
   if (columns.length === 0) {
-    // Insert with default values and return id
+    // Insert with default values and return auto-generated id
     const result = await client.query(`INSERT INTO "${tableName}" DEFAULT VALUES RETURNING id`);
     return result.rows[0].id;
   }
 
+  // Check if we're inserting an existing PK
+  const pkField = detectPKFromColumns(columns);
+
   const placeholders = columns.map((_, idx) => `$${idx + 1}`).join(', ');
   const columnList = columns.map(c => `"${c}"`).join(', ');
-  const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders}) RETURNING id`;
+  const returningClause = pkField ? pkField : 'id';
+  const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders}) RETURNING "${returningClause}"`;
 
   const result = await client.query(insertSql, values);
-  return result.rows[0].id;
+  return result.rows[0][pkField || 'id'];
 }
 
 /**
@@ -694,8 +712,9 @@ async function insertChildRecordPostgres(
 }
 
 /**
- * Insert parent record and return the generated ID (MySQL)
- * Uses LAST_INSERT_ID() to capture the auto-generated primary key
+ * Insert parent record and return the primary key value (MySQL)
+ * If record has existing PK, inserts it and returns that value
+ * If no PK, uses LAST_INSERT_ID() to capture auto-generated ID
  */
 async function insertParentRecordMysql(
   connection: any,
@@ -710,13 +729,24 @@ async function insertParentRecordMysql(
     return idResult[0].id;
   }
 
+  // Check if we're inserting an existing PK
+  const pkField = detectPKFromColumns(columns);
+
   const placeholders = columns.map(() => '?').join(', ');
   const columnList = columns.map(c => `\`${c}\``).join(', ');
   const insertSql = `INSERT INTO \`${tableName}\` (${columnList}) VALUES (${placeholders})`;
 
   await connection.query(insertSql, values);
-  const [idResult] = await connection.query('SELECT LAST_INSERT_ID() as id');
-  return idResult[0].id;
+
+  if (pkField) {
+    // Return the PK value we just inserted
+    const pkIndex = columns.indexOf(pkField);
+    return values[pkIndex];
+  } else {
+    // Return auto-generated ID
+    const [idResult] = await connection.query('SELECT LAST_INSERT_ID() as id');
+    return idResult[0].id;
+  }
 }
 
 /**
@@ -736,8 +766,9 @@ async function insertChildRecordMysql(
 }
 
 /**
- * Insert parent record and return the generated ID (SQLite)
- * Uses lastInsertRowid to capture the auto-generated primary key
+ * Insert parent record and return the primary key value (SQLite)
+ * If record has existing PK, inserts it and returns that value
+ * If no PK, uses lastInsertRowid to capture auto-generated ID
  */
 function insertParentRecordSqlite(
   db: any,
@@ -752,13 +783,24 @@ function insertParentRecordSqlite(
     return db.prepare('SELECT last_insert_rowid() as id').get().id;
   }
 
+  // Check if we're inserting an existing PK
+  const pkField = detectPKFromColumns(columns);
+
   const placeholders = columns.map(() => '?').join(', ');
   const columnList = columns.map(c => `"${c}"`).join(', ');
   const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders})`;
 
   const stmt = db.prepare(insertSql);
   stmt.run(...values);
-  return db.prepare('SELECT last_insert_rowid() as id').get().id;
+
+  if (pkField) {
+    // Return the PK value we just inserted
+    const pkIndex = columns.indexOf(pkField);
+    return values[pkIndex];
+  } else {
+    // Return auto-generated ID
+    return db.prepare('SELECT last_insert_rowid() as id').get().id;
+  }
 }
 
 /**
