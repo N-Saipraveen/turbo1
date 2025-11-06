@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Database, ArrowRightLeft, Eye, Upload, Zap, Shield, GitBranch, Sparkles } from 'lucide-react';
+import { Database, ArrowRightLeft, Eye, Upload, Zap, Shield, GitBranch, Sparkles, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -17,6 +17,55 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-muted/20 to-background">
+      {/* Top Banner */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8, ease: 'easeOut' }}
+        className="relative overflow-hidden"
+      >
+        <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 py-3">
+          <div className="container mx-auto px-4">
+            <p className="text-center text-white text-sm md:text-base font-medium flex items-center justify-center gap-2 flex-wrap">
+              <span>Built with</span>
+              <motion.span
+                animate={{
+                  scale: [1, 1.2, 1],
+                }}
+                transition={{
+                  duration: 1.5,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                }}
+                className="inline-block"
+              >
+                <Heart className="h-4 w-4 fill-red-500 text-red-500 inline" />
+              </motion.span>
+              <span>by</span>
+              <span className="font-bold">Sai Praveen</span>
+              <span>&</span>
+              <span className="font-bold">Abhiram</span>
+              <span className="hidden sm:inline">for</span>
+              <span className="font-bold bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
+                VIT-AP Capstone Project
+              </span>
+            </p>
+          </div>
+        </div>
+        {/* Animated gradient border bottom */}
+        <motion.div
+          className="h-1 bg-gradient-to-r from-transparent via-white to-transparent"
+          animate={{
+            x: ['-100%', '100%'],
+          }}
+          transition={{
+            duration: 3,
+            repeat: Infinity,
+            ease: 'linear',
+          }}
+        />
+      </motion.div>
+
       <div className="container mx-auto px-4 py-16">
         {/* Hero Section */}
         <motion.div
