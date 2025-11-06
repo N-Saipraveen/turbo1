@@ -393,7 +393,12 @@ function inferSqlType(
 ): string {
   const lowerFieldName = fieldName.toLowerCase();
 
-  // ID fields
+  // MongoDB _id field should always be TEXT to store ObjectId strings
+  if (lowerFieldName === '_id') {
+    return 'TEXT';
+  }
+
+  // Other ID fields (foreign keys like user_id, product_id, etc.)
   if (lowerFieldName === 'id' || lowerFieldName.endsWith('_id')) {
     return dialect === 'postgres' ? 'INTEGER' : 'INT';
   }
