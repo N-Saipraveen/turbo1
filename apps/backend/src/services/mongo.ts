@@ -1,3 +1,5 @@
+import { preprocessMongoShell } from './mongoShellParser.js';
+
 export interface MongoSchemaDefinition {
   collection: string;
   fields: MongoField[];
@@ -92,9 +94,6 @@ function inferMongoType(value: any): string {
 
 export function parseMongoSchema(content: string): MongoSchemaDefinition[] {
   try {
-    // Import preprocessor
-    const { preprocessMongoShell } = require('./mongoShellParser.js');
-
     // Preprocess MongoDB Shell syntax to normalized JSON
     const processed = preprocessMongoShell(content);
 

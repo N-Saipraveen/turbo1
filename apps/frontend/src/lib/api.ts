@@ -56,6 +56,18 @@ export const convertSchema = async (request: ConvertRequest): Promise<ConvertRes
   return response.data;
 };
 
+// Dedicated MongoDB → SQL conversion endpoint (server-side only)
+export const convertMongoToSql = async (
+  content: string,
+  dialect: 'postgres' | 'mysql' | 'sqlite' = 'postgres'
+): Promise<ConvertResponse> => {
+  const response = await api.post<ConvertResponse>('/api/convert/mongodb-to-sql', {
+    content,
+    dialect,
+  });
+  return response.data;
+};
+
 export const analyzeSchema = async (request: AnalyzeRequest): Promise<AnalyzeResponse> => {
   const response = await api.post<AnalyzeResponse>('/api/analyze', request);
   return response.data;
