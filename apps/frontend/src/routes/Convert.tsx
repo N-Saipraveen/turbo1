@@ -21,7 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { convertSchema, analyzeSchema, type ConvertRequest, type ConvertResponse } from '@/lib/api';
+import { convertSchema, convertMongoToSql, analyzeSchema, type ConvertRequest, type ConvertResponse } from '@/lib/api';
 import { SchemaEditor } from '@/components/SchemaEditor';
 
 export default function Convert() {
@@ -123,17 +123,25 @@ export default function Convert() {
     const loadingToast = toast.loading('Converting schema...');
 
     try {
-      const request: ConvertRequest = {
-        from,
-        to,
-        content,
-        options: {
-          dialect,
-          ai: useAi,
-        },
-      };
+      let response: ConvertResponse;
 
-      const response = await convertSchema(request);
+      // Use dedicated server-side endpoint for MongoDB → SQL
+      if (from === 'mongo' && to === 'sql') {
+        response = await convertMongoToSql(content, dialect);
+      } else {
+        // Use general conversion endpoint for other conversions
+        const request: ConvertRequest = {
+          from,
+          to,
+          content,
+          options: {
+            dialect,
+            ai: useAi,
+          },
+        };
+        response = await convertSchema(request);
+      }
+
       setResult(response);
 
       if (response.warnings.length > 0) {
@@ -143,8 +151,13 @@ export default function Convert() {
       toast.success('Conversion successful!', { id: loadingToast });
     } catch (error) {
       console.error('Conversion error:', error);
-      toast.error(`Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`, {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : 'Unknown error occurred during conversion';
+
+      toast.error(`Conversion failed: ${errorMessage}`, {
         id: loadingToast,
+        duration: 5000,
       });
     } finally {
       setLoading(false);

@@ -11,6 +11,36 @@ import { logger } from '../lib/logger.js';
 
 const router = express.Router();
 
+// Dedicated endpoint for MongoDB → SQL conversion with preprocessing
+router.post('/mongodb-to-sql', async (req, res) => {
+  try {
+    const { content, dialect = 'postgres' } = req.body;
+
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'Content must be a non-empty string',
+      });
+    }
+
+    logger.info('Converting MongoDB to SQL', { dialect });
+
+    // This runs entirely server-side with Node.js libraries
+    const result = await convertMongoToSql(
+      content,
+      dialect as 'postgres' | 'mysql' | 'sqlite'
+    );
+
+    return res.json(result);
+  } catch (error) {
+    logger.error('MongoDB to SQL conversion failed', error);
+    return res.status(500).json({
+      error: 'Conversion failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     // Validate request
