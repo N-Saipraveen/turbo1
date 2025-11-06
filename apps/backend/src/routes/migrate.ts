@@ -266,4 +266,71 @@ router.post('/execute-json-migration', async (req, res) => {
   }
 });
 
+// General migration preview (works for ALL source types)
+router.post('/preview-migration', async (req, res) => {
+  try {
+    const { sourceConnection, targetType } = req.body;
+
+    if (!sourceConnection || !targetType) {
+      return res.status(400).json({
+        error: 'Source connection and target type are required',
+      });
+    }
+
+    const sourceValidation = DatabaseConnectionSchema.safeParse(sourceConnection);
+    if (!sourceValidation.success) {
+      return res.status(400).json({
+        error: 'Invalid source connection parameters',
+        details: sourceValidation.error.errors,
+      });
+    }
+
+    // Import the general migration preview function
+    const { previewMigration } = await import('../services/generalMigration.js');
+
+    const preview = await previewMigration(sourceConnection, targetType);
+    return res.json(preview);
+  } catch (error) {
+    logger.error('Migration preview failed', error);
+    return res.status(500).json({
+      error: 'Failed to generate preview',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// General migration execution (works for ALL source→target combinations)
+router.post('/execute-migration', async (req, res) => {
+  try {
+    const { sourceConnection, targetConnection } = req.body;
+
+    if (!sourceConnection || !targetConnection) {
+      return res.status(400).json({
+        error: 'Source and target connections are required',
+      });
+    }
+
+    const sourceValidation = DatabaseConnectionSchema.safeParse(sourceConnection);
+    const targetValidation = DatabaseConnectionSchema.safeParse(targetConnection);
+
+    if (!sourceValidation.success || !targetValidation.success) {
+      return res.status(400).json({
+        error: 'Invalid connection parameters',
+      });
+    }
+
+    // Import the general migration execute function
+    const { executeMigration } = await import('../services/generalMigration.js');
+
+    const result = await executeMigration(sourceConnection, targetConnection);
+    return res.json(result);
+  } catch (error) {
+    logger.error('Migration execution failed', error);
+    return res.status(500).json({
+      error: 'Migration failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;

@@ -203,3 +203,32 @@ export const executeJsonMigration = async (
   });
   return response.data;
 };
+
+// General migration (works for ALL source types)
+export const previewMigration = async (
+  sourceConnection: DatabaseConnection,
+  targetType: string
+): Promise<JsonMigrationPreview> => {
+  const response = await api.post('/api/migrate/preview-migration', {
+    sourceConnection,
+    targetType,
+  });
+  return response.data;
+};
+
+export const executeMigration = async (
+  sourceConnection: DatabaseConnection,
+  targetConnection: DatabaseConnection
+): Promise<{
+  success: boolean;
+  message: string;
+  recordsInserted: number;
+  tableDetails: Array<{ table: string; rows: number }>;
+  errors?: string[];
+}> => {
+  const response = await api.post('/api/migrate/execute-migration', {
+    sourceConnection,
+    targetConnection,
+  });
+  return response.data;
+};
