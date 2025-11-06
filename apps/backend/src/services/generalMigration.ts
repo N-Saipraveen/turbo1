@@ -286,6 +286,14 @@ async function migrateToMongoDB(
       // MongoDB → MongoDB: Direct collection copy
       for (const table of sourceData.tables) {
         const collection = db.collection(table.name);
+
+        // Drop existing collection to prevent duplicates
+        try {
+          await collection.drop();
+        } catch (err) {
+          // Collection might not exist, ignore error
+        }
+
         if (table.rows.length > 0) {
           const result = await collection.insertMany(table.rows);
           const inserted = result.insertedCount;
@@ -299,6 +307,14 @@ async function migrateToMongoDB(
       const mainTableName = sourceData.tables[0]?.name || 'collection';
 
       const collection = db.collection(mainTableName);
+
+      // Drop existing collection to prevent duplicates
+      try {
+        await collection.drop();
+      } catch (err) {
+        // Collection might not exist, ignore error
+      }
+
       if (documents.length > 0) {
         const result = await collection.insertMany(documents);
         totalInserted = result.insertedCount;

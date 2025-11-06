@@ -152,6 +152,23 @@ function generateSqlInserts(records: any[], _dialect: 'postgres' | 'mysql' | 'sq
 }
 
 /**
+ * Extract table names from CREATE TABLE statements
+ */
+function extractTableNames(createStatements: string[]): string[] {
+  const tableNames: string[] = [];
+
+  for (const stmt of createStatements) {
+    // Match "CREATE TABLE table_name" or "CREATE TABLE IF NOT EXISTS table_name"
+    const match = stmt.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i);
+    if (match && match[1]) {
+      tableNames.push(match[1]);
+    }
+  }
+
+  return tableNames;
+}
+
+/**
  * Execute JSON to database migration - COMPLETE DATA MIGRATION WITH NESTED STRUCTURES
  */
 export async function executeJsonMigration(
@@ -231,6 +248,16 @@ export async function executeJsonMigration(
 
         try {
           await client.query('BEGIN');
+
+          // Drop existing tables to prevent duplicates
+          const tableNames = extractTableNames(createStatements);
+          for (const tableName of tableNames.reverse()) {
+            try {
+              await client.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`);
+            } catch (err) {
+              // Ignore errors if table doesn't exist
+            }
+          }
 
           // Create tables
           for (const createStmt of createStatements) {
@@ -373,6 +400,16 @@ export async function executeJsonMigration(
         try {
           await mysqlConnection.beginTransaction();
 
+          // Drop existing tables to prevent duplicates
+          const tableNames = extractTableNames(createStatements);
+          for (const tableName of tableNames.reverse()) {
+            try {
+              await mysqlConnection.query(`DROP TABLE IF EXISTS \`${tableName}\``);
+            } catch (err) {
+              // Ignore errors if table doesn't exist
+            }
+          }
+
           // Create tables
           for (const createStmt of createStatements) {
             const statements = createStmt.split(';').filter(s => s.trim());
@@ -503,6 +540,16 @@ export async function executeJsonMigration(
         // SQLite
         try {
           connection.exec('BEGIN TRANSACTION');
+
+          // Drop existing tables to prevent duplicates
+          const tableNames = extractTableNames(createStatements);
+          for (const tableName of tableNames.reverse()) {
+            try {
+              connection.exec(`DROP TABLE IF EXISTS "${tableName}"`);
+            } catch (err) {
+              // Ignore errors if table doesn't exist
+            }
+          }
 
           // Create tables
           for (const createStmt of createStatements) {
