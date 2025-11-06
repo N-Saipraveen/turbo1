@@ -82,6 +82,21 @@ export async function convertJsonToSql(
   }
 }
 
+/**
+ * Detect if an object has a primary key field
+ */
+function detectPrimaryKey(obj: any): string | null {
+  const pkCandidates = ['id', '_id', 'uuid', 'ID', 'Id', 'UUID'];
+
+  for (const candidate of pkCandidates) {
+    if (obj.hasOwnProperty(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function analyzeAndNormalizeSchema(
   records: any[],
   mainTableName: string,
@@ -98,17 +113,19 @@ function analyzeAndNormalizeSchema(
     uniqueConstraints: [],
   };
 
-  // Add primary key
-  const hasPrimaryKey = sample.hasOwnProperty('id');
-  if (hasPrimaryKey) {
+  // Detect existing primary key
+  const existingPK = detectPrimaryKey(sample);
+
+  if (existingPK) {
+    // Use existing primary key field
     mainTable.columns.push({
-      name: 'id',
-      type: inferSqlType('id', sample.id, dialect),
+      name: existingPK,
+      type: inferSqlType(existingPK, sample[existingPK], dialect),
       nullable: false,
       isPrimaryKey: true,
     });
   } else {
-    // Generate auto-increment PK
+    // Generate auto-increment PK only if no existing PK
     mainTable.columns.push({
       name: 'id',
       type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
@@ -119,7 +136,8 @@ function analyzeAndNormalizeSchema(
 
   // Process each field
   for (const [fieldName, value] of Object.entries(sample)) {
-    if (fieldName === '_collection' || fieldName === 'id') continue;
+    // Skip internal fields and the primary key we already added
+    if (fieldName === '_collection' || fieldName === existingPK) continue;
 
     // Check if it's a nested object
     if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -212,13 +230,26 @@ function createRelatedTable(
     uniqueConstraints: [],
   };
 
-  // Add auto-increment PK
-  table.columns.push({
-    name: 'id',
-    type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
-    nullable: false,
-    isPrimaryKey: true,
-  });
+  // Detect existing primary key in nested object
+  const existingPK = detectPrimaryKey(nestedObject);
+
+  if (existingPK) {
+    // Use existing primary key
+    table.columns.push({
+      name: existingPK,
+      type: inferSqlType(existingPK, nestedObject[existingPK], dialect),
+      nullable: false,
+      isPrimaryKey: true,
+    });
+  } else {
+    // Auto-generate PK only if none exists
+    table.columns.push({
+      name: 'id',
+      type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
+      nullable: false,
+      isPrimaryKey: true,
+    });
+  }
 
   // Add foreign key to parent
   table.columns.push({
@@ -233,8 +264,10 @@ function createRelatedTable(
     referencedColumn: 'id',
   });
 
-  // Add fields from nested object
+  // Add fields from nested object (skip PK as it's already added)
   for (const [fieldName, value] of Object.entries(nestedObject)) {
+    if (fieldName === existingPK) continue; // Skip PK field
+
     const sqlType = inferSqlType(fieldName, value, dialect);
     table.columns.push({
       name: fieldName,
@@ -259,13 +292,26 @@ function createChildTable(
     uniqueConstraints: [],
   };
 
-  // Add auto-increment PK
-  table.columns.push({
-    name: 'id',
-    type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
-    nullable: false,
-    isPrimaryKey: true,
-  });
+  // Detect existing primary key in child object
+  const existingPK = detectPrimaryKey(childObject);
+
+  if (existingPK) {
+    // Use existing primary key
+    table.columns.push({
+      name: existingPK,
+      type: inferSqlType(existingPK, childObject[existingPK], dialect),
+      nullable: false,
+      isPrimaryKey: true,
+    });
+  } else {
+    // Auto-generate PK only if none exists
+    table.columns.push({
+      name: 'id',
+      type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
+      nullable: false,
+      isPrimaryKey: true,
+    });
+  }
 
   // Add foreign key to parent
   const parentIdColumn = `${toSnakeCase(parentTableName)}_id`;
@@ -281,8 +327,10 @@ function createChildTable(
     referencedColumn: 'id',
   });
 
-  // Add fields from child object
+  // Add fields from child object (skip PK as it's already added)
   for (const [fieldName, value] of Object.entries(childObject)) {
+    if (fieldName === existingPK) continue; // Skip PK field
+
     const sqlType = inferSqlType(fieldName, value, dialect);
     table.columns.push({
       name: fieldName,
