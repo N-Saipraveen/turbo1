@@ -197,6 +197,13 @@ export async function executeJsonMigration(
       const db = connection.db(targetConnection.database || 'test');
       const collection = db.collection('main_collection');
 
+      // Drop existing collection to prevent duplicates on re-run
+      try {
+        await collection.drop();
+      } catch (err) {
+        // Collection might not exist, ignore error
+      }
+
       const progress: MigrationProgress[] = [{
         table: 'main_collection',
         current: 0,
