@@ -12,6 +12,7 @@ import ReactFlow, {
   addEdge,
   Connection,
   MiniMap,
+  MarkerType,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Button } from '@/components/ui/button';
@@ -197,7 +198,7 @@ export default function Convert() {
         animated: edge.type === 'foreign_key',
         style: { stroke: edge.type === 'foreign_key' ? '#3b82f6' : '#6b7280', strokeWidth: 2 },
         markerEnd: {
-          type: 'arrowclosed',
+          type: MarkerType.ArrowClosed,
           color: edge.type === 'foreign_key' ? '#3b82f6' : '#6b7280',
         },
       }));

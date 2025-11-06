@@ -557,12 +557,13 @@ function analyzeDataStructure(records: any[]): {
         // Each array element becomes a row with FK to parent
         for (const item of value) {
           if (typeof item === 'object' && item !== null) {
+            // For arrays of objects, use main_table_id (matches createChildTable schema)
             childTables[childTableName].push({
-              parent_id: pkValue,
+              main_table_id: pkValue,
               ...item,
             });
           } else {
-            // Primitive array values
+            // For arrays of primitives, use parent_id (matches createPrimitiveArrayTable schema)
             childTables[childTableName].push({
               parent_id: pkValue,
               value: item,

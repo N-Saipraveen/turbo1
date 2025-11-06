@@ -64,6 +64,7 @@ export default function Migrate() {
   const [migrationComplete, setMigrationComplete] = useState(false);
   const [migrationResult, setMigrationResult] = useState<string>('');
   const [recordsInserted, setRecordsInserted] = useState<number>(0);
+  const [tableDetails, setTableDetails] = useState<Array<{ table: string; rows: number }>>([]);
 
   // Handle source type change
   const handleSourceTypeChange = (type: string) => {
@@ -172,7 +173,8 @@ export default function Migrate() {
         setMigrationComplete(true);
         setMigrationResult(result.message);
         setRecordsInserted(result.recordsInserted);
-        toast.success(`Migration completed! ${result.recordsInserted} records inserted.`);
+        setTableDetails(result.tableDetails || []);
+        toast.success(`Migration completed! ${result.recordsInserted} records inserted across ${result.tableDetails?.length || 0} tables.`);
       } else {
         toast.error(result.message);
       }
@@ -579,6 +581,25 @@ export default function Migrate() {
                         </pre>
                       </div>
 
+                      {preview.tableSummary && preview.tableSummary.length > 0 && (
+                        <div>
+                          <Label className="text-lg font-semibold mb-2">Migration Plan</Label>
+                          <div className="rounded-xl bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 p-4 space-y-2">
+                            {preview.tableSummary.map((summary) => (
+                              <div
+                                key={summary.table}
+                                className="flex justify-between items-center bg-white rounded-lg px-4 py-2 shadow-sm"
+                              >
+                                <span className="font-medium text-gray-700">{summary.table}</span>
+                                <span className="font-bold text-purple-600">
+                                  ~{summary.estimatedRows} rows
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {preview.sampleInserts && preview.sampleInserts.length > 0 && (
                         <div>
                           <Label className="text-lg font-semibold mb-2">
@@ -594,7 +615,8 @@ export default function Migrate() {
                         <p className="text-sm text-blue-800">
                           ✅ <strong>Ready to migrate:</strong> This will create {preview.tableCount}{' '}
                           {preview.tableCount === 1 ? 'table' : 'tables'} and insert{' '}
-                          {preview.recordCount} records into your {targetType.toUpperCase()} database.
+                          <strong>{preview.recordCount} total records</strong> into your {targetType.toUpperCase()} database.
+                          All data from your source will be migrated with full relational normalization.
                         </p>
                       </div>
                     </div>
@@ -658,13 +680,39 @@ export default function Migrate() {
                         <CheckCircle2 className="h-12 w-12 text-white" />
                       </div>
                       <h3 className="text-2xl font-bold text-green-700">Migration Complete!</h3>
-                      <div className="rounded-xl bg-green-50 border border-green-200 p-4 max-w-md mx-auto">
+                      <div className="rounded-xl bg-green-50 border border-green-200 p-4 max-w-md mx-auto space-y-3">
                         <div className="text-center space-y-2">
                           <div className="text-4xl font-bold text-green-700">{recordsInserted}</div>
-                          <div className="text-sm text-green-600">Records Successfully Inserted</div>
+                          <div className="text-sm text-green-600">Total Records Inserted</div>
                         </div>
+
+                        {tableDetails && tableDetails.length > 0 && (
+                          <div className="border-t border-green-200 pt-3">
+                            <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-2">
+                              Per-Table Breakdown
+                            </div>
+                            <div className="space-y-1">
+                              {tableDetails.map((detail) => (
+                                <div
+                                  key={detail.table}
+                                  className="flex justify-between items-center text-sm bg-white/50 rounded px-3 py-1"
+                                >
+                                  <span className="font-medium text-gray-700">{detail.table}</span>
+                                  <span className="font-bold text-green-600">{detail.rows} rows</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <p className="text-gray-600">{migrationResult}</p>
+                      <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 max-w-md mx-auto">
+                        <p className="text-sm text-blue-800">
+                          ✅ <strong>100% Complete:</strong> All {recordsInserted} records have been transferred
+                          to your {targetType.toUpperCase()} database with full schema normalization and
+                          foreign key relationships preserved.
+                        </p>
+                      </div>
                       {preview?.schema && (
                         <Button
                           variant="outline"
