@@ -211,38 +211,15 @@ export async function executeJsonMigration(
       // Extract CREATE TABLE statements from artifacts
       const createStatements = Object.values(result.artifacts);
 
-      // Analyze the data structure to understand relationships
-      const { mainTableData, childTables, relatedTables } = analyzeDataStructure(dataArray);
-
-      // Initialize progress tracking
+      // Initialize progress tracking (tables discovered dynamically during migration)
       const progressMap = new Map<string, MigrationProgress>();
       progressMap.set('main_table', {
         table: 'main_table',
         current: 0,
-        total: mainTableData.length,
+        total: dataArray.length,
         percentage: 0,
         status: 'pending',
       });
-
-      for (const [tableName, data] of Object.entries(childTables)) {
-        progressMap.set(tableName, {
-          table: tableName,
-          current: 0,
-          total: data.length,
-          percentage: 0,
-          status: 'pending',
-        });
-      }
-
-      for (const [tableName, data] of Object.entries(relatedTables)) {
-        progressMap.set(tableName, {
-          table: tableName,
-          current: 0,
-          total: data.length,
-          percentage: 0,
-          status: 'pending',
-        });
-      }
 
       const updateProgress = () => {
         progressCallback?.(Array.from(progressMap.values()));
@@ -265,75 +242,115 @@ export async function executeJsonMigration(
             }
           }
 
-          // Insert main table data
-          progressMap.get('main_table')!.status = 'in_progress';
-          updateProgress();
+          // Process each record with parent-first, then children pattern
+          for (let i = 0; i < dataArray.length; i++) {
+            const record = dataArray[i];
 
-          const mainInserted = await insertRecordsPostgres(
-            client,
-            mainTableData,
-            'main_table',
-            (current) => {
-              const progress = progressMap.get('main_table')!;
-              progress.current = current;
-              progress.percentage = Math.floor((current / progress.total) * 100);
-              updateProgress();
+            // Update progress
+            progressMap.get('main_table')!.status = 'in_progress';
+            progressMap.get('main_table')!.current = i + 1;
+            progressMap.get('main_table')!.percentage = Math.floor(((i + 1) / dataArray.length) * 100);
+            updateProgress();
+
+            // 1. Insert parent record FIRST
+            const mainRecord: any = {};
+            const childRecords: Record<string, any[]> = {};
+            const relatedRecords: Record<string, any> = {};
+
+            // Separate fields into parent, children, and related
+            for (const key in record) {
+              const value = record[key];
+
+              if (Array.isArray(value)) {
+                // Array becomes child table records
+                const childTableName = `main_table_${key}`;
+                childRecords[childTableName] = value;
+              } else if (value && typeof value === 'object') {
+                // Nested object becomes related table record
+                const relatedTableName = `main_table_${key}`;
+                relatedRecords[relatedTableName] = value;
+              } else {
+                // Scalar value goes in main table
+                mainRecord[key] = value;
+              }
             }
-          );
 
-          progressMap.get('main_table')!.status = 'completed';
-          tableDetails.push({ table: 'main_table', rows: mainInserted });
-          totalRecordsInserted += mainInserted;
-          updateProgress();
+            // Insert parent and capture the returned ID
+            const parentColumns = Object.keys(mainRecord);
+            const parentId = await insertParentRecordPostgres(client, 'main_table', parentColumns, parentColumns.map(col => mainRecord[col]));
 
-          // Insert child table data (arrays)
-          for (const [tableName, records] of Object.entries(childTables)) {
-            if (progressMap.has(tableName)) {
-              progressMap.get(tableName)!.status = 'in_progress';
-              updateProgress();
+            // 2. Insert child records (arrays) with captured parent ID
+            for (const [childTableName, childArray] of Object.entries(childRecords)) {
+              if (!progressMap.has(childTableName)) {
+                progressMap.set(childTableName, {
+                  table: childTableName,
+                  current: 0,
+                  total: dataArray.reduce((sum, r) => sum + (Array.isArray(r[childTableName.replace('main_table_', '')]) ? r[childTableName.replace('main_table_', '')].length : 0), 0),
+                  percentage: 0,
+                  status: 'in_progress',
+                });
+              }
 
-              const inserted = await insertRecordsPostgres(
-                client,
-                records,
-                tableName,
-                (current) => {
-                  const progress = progressMap.get(tableName)!;
-                  progress.current = current;
-                  progress.percentage = Math.floor((current / progress.total) * 100);
-                  updateProgress();
+              progressMap.get(childTableName)!.status = 'in_progress';
+
+              for (const item of childArray) {
+                if (typeof item === 'object' && item !== null) {
+                  // Array of objects
+                  const childColumns = ['main_table_id', ...Object.keys(item)];
+                  const childValues = [parentId, ...Object.keys(item).map(k => item[k])];
+                  await insertChildRecordPostgres(client, childTableName, childColumns, childValues);
+                } else {
+                  // Array of primitives
+                  await insertChildRecordPostgres(client, childTableName, ['parent_id', 'value'], [parentId, item]);
                 }
-              );
 
-              progressMap.get(tableName)!.status = 'completed';
-              tableDetails.push({ table: tableName, rows: inserted });
-              totalRecordsInserted += inserted;
+                const progress = progressMap.get(childTableName)!;
+                progress.current++;
+                progress.percentage = Math.floor((progress.current / progress.total) * 100);
+                updateProgress();
+              }
+            }
+
+            // 3. Insert related records (nested objects) with captured parent ID
+            for (const [relatedTableName, relatedObj] of Object.entries(relatedRecords)) {
+              if (!progressMap.has(relatedTableName)) {
+                progressMap.set(relatedTableName, {
+                  table: relatedTableName,
+                  current: 0,
+                  total: dataArray.length,
+                  percentage: 0,
+                  status: 'in_progress',
+                });
+              }
+
+              progressMap.get(relatedTableName)!.status = 'in_progress';
+
+              const relatedColumns = ['main_table_id', ...Object.keys(relatedObj)];
+              const relatedValues = [parentId, ...Object.keys(relatedObj).map(k => relatedObj[k])];
+              await insertChildRecordPostgres(client, relatedTableName, relatedColumns, relatedValues);
+
+              const progress = progressMap.get(relatedTableName)!;
+              progress.current++;
+              progress.percentage = Math.floor((progress.current / progress.total) * 100);
               updateProgress();
             }
           }
 
-          // Insert related table data (nested objects)
-          for (const [tableName, records] of Object.entries(relatedTables)) {
-            if (progressMap.has(tableName)) {
-              progressMap.get(tableName)!.status = 'in_progress';
-              updateProgress();
+          // Mark all tables as completed
+          progressMap.get('main_table')!.status = 'completed';
+          updateProgress();
 
-              const inserted = await insertRecordsPostgres(
-                client,
-                records,
-                tableName,
-                (current) => {
-                  const progress = progressMap.get(tableName)!;
-                  progress.current = current;
-                  progress.percentage = Math.floor((current / progress.total) * 100);
-                  updateProgress();
-                }
-              );
-
+          for (const [tableName] of progressMap) {
+            if (tableName !== 'main_table') {
               progressMap.get(tableName)!.status = 'completed';
-              tableDetails.push({ table: tableName, rows: inserted });
-              totalRecordsInserted += inserted;
-              updateProgress();
             }
+          }
+          updateProgress();
+
+          // Calculate table details
+          for (const [tableName, progress] of progressMap) {
+            tableDetails.push({ table: tableName, rows: progress.current });
+            totalRecordsInserted += progress.current;
           }
 
           await client.query('COMMIT');
@@ -366,50 +383,106 @@ export async function executeJsonMigration(
             }
           }
 
-          // Insert main table data
-          progressMap.get('main_table')!.status = 'in_progress';
-          updateProgress();
+          // Process each record with parent-first, then children pattern
+          for (let i = 0; i < dataArray.length; i++) {
+            const record = dataArray[i];
 
-          const mainInserted = await insertRecordsMysql(
-            mysqlConnection,
-            mainTableData,
-            'main_table',
-            (current) => {
-              const progress = progressMap.get('main_table')!;
-              progress.current = current;
-              progress.percentage = Math.floor((current / progress.total) * 100);
-              updateProgress();
+            // Update progress
+            progressMap.get('main_table')!.status = 'in_progress';
+            progressMap.get('main_table')!.current = i + 1;
+            progressMap.get('main_table')!.percentage = Math.floor(((i + 1) / dataArray.length) * 100);
+            updateProgress();
+
+            // 1. Insert parent record FIRST
+            const mainRecord: any = {};
+            const childRecords: Record<string, any[]> = {};
+            const relatedRecords: Record<string, any> = {};
+
+            // Separate fields
+            for (const key in record) {
+              const value = record[key];
+
+              if (Array.isArray(value)) {
+                childRecords[`main_table_${key}`] = value;
+              } else if (value && typeof value === 'object') {
+                relatedRecords[`main_table_${key}`] = value;
+              } else {
+                mainRecord[key] = value;
+              }
             }
-          );
 
-          progressMap.get('main_table')!.status = 'completed';
-          tableDetails.push({ table: 'main_table', rows: mainInserted });
-          totalRecordsInserted += mainInserted;
-          updateProgress();
+            // Insert parent and capture the returned ID using LAST_INSERT_ID()
+            const parentColumns = Object.keys(mainRecord);
+            const parentId = await insertParentRecordMysql(mysqlConnection, 'main_table', parentColumns, parentColumns.map(col => mainRecord[col]));
 
-          // Insert child and related tables
-          for (const [tableName, records] of Object.entries({...childTables, ...relatedTables})) {
-            if (progressMap.has(tableName)) {
-              progressMap.get(tableName)!.status = 'in_progress';
-              updateProgress();
+            // 2. Insert child records with captured parent ID
+            for (const [childTableName, childArray] of Object.entries(childRecords)) {
+              if (!progressMap.has(childTableName)) {
+                progressMap.set(childTableName, {
+                  table: childTableName,
+                  current: 0,
+                  total: dataArray.reduce((sum, r) => sum + (Array.isArray(r[childTableName.replace('main_table_', '')]) ? r[childTableName.replace('main_table_', '')].length : 0), 0),
+                  percentage: 0,
+                  status: 'in_progress',
+                });
+              }
 
-              const inserted = await insertRecordsMysql(
-                mysqlConnection,
-                records,
-                tableName,
-                (current) => {
-                  const progress = progressMap.get(tableName)!;
-                  progress.current = current;
-                  progress.percentage = Math.floor((current / progress.total) * 100);
-                  updateProgress();
+              progressMap.get(childTableName)!.status = 'in_progress';
+
+              for (const item of childArray) {
+                if (typeof item === 'object' && item !== null) {
+                  const childColumns = ['main_table_id', ...Object.keys(item)];
+                  const childValues = [parentId, ...Object.keys(item).map(k => item[k])];
+                  await insertChildRecordMysql(mysqlConnection, childTableName, childColumns, childValues);
+                } else {
+                  await insertChildRecordMysql(mysqlConnection, childTableName, ['parent_id', 'value'], [parentId, item]);
                 }
-              );
 
-              progressMap.get(tableName)!.status = 'completed';
-              tableDetails.push({ table: tableName, rows: inserted });
-              totalRecordsInserted += inserted;
+                const progress = progressMap.get(childTableName)!;
+                progress.current++;
+                progress.percentage = Math.floor((progress.current / progress.total) * 100);
+                updateProgress();
+              }
+            }
+
+            // 3. Insert related records with captured parent ID
+            for (const [relatedTableName, relatedObj] of Object.entries(relatedRecords)) {
+              if (!progressMap.has(relatedTableName)) {
+                progressMap.set(relatedTableName, {
+                  table: relatedTableName,
+                  current: 0,
+                  total: dataArray.length,
+                  percentage: 0,
+                  status: 'in_progress',
+                });
+              }
+
+              progressMap.get(relatedTableName)!.status = 'in_progress';
+
+              const relatedColumns = ['main_table_id', ...Object.keys(relatedObj)];
+              const relatedValues = [parentId, ...Object.keys(relatedObj).map(k => relatedObj[k])];
+              await insertChildRecordMysql(mysqlConnection, relatedTableName, relatedColumns, relatedValues);
+
+              const progress = progressMap.get(relatedTableName)!;
+              progress.current++;
+              progress.percentage = Math.floor((progress.current / progress.total) * 100);
               updateProgress();
             }
+          }
+
+          // Mark all tables as completed
+          progressMap.get('main_table')!.status = 'completed';
+          for (const [tableName] of progressMap) {
+            if (tableName !== 'main_table') {
+              progressMap.get(tableName)!.status = 'completed';
+            }
+          }
+          updateProgress();
+
+          // Calculate table details
+          for (const [tableName, progress] of progressMap) {
+            tableDetails.push({ table: tableName, rows: progress.current });
+            totalRecordsInserted += progress.current;
           }
 
           await mysqlConnection.commit();
@@ -441,50 +514,106 @@ export async function executeJsonMigration(
             }
           }
 
-          // Insert main table data
-          progressMap.get('main_table')!.status = 'in_progress';
-          updateProgress();
+          // Process each record with parent-first, then children pattern
+          for (let i = 0; i < dataArray.length; i++) {
+            const record = dataArray[i];
 
-          const mainInserted = await insertRecordsSqlite(
-            connection,
-            mainTableData,
-            'main_table',
-            (current) => {
-              const progress = progressMap.get('main_table')!;
-              progress.current = current;
-              progress.percentage = Math.floor((current / progress.total) * 100);
-              updateProgress();
+            // Update progress
+            progressMap.get('main_table')!.status = 'in_progress';
+            progressMap.get('main_table')!.current = i + 1;
+            progressMap.get('main_table')!.percentage = Math.floor(((i + 1) / dataArray.length) * 100);
+            updateProgress();
+
+            // 1. Insert parent record FIRST
+            const mainRecord: any = {};
+            const childRecords: Record<string, any[]> = {};
+            const relatedRecords: Record<string, any> = {};
+
+            // Separate fields
+            for (const key in record) {
+              const value = record[key];
+
+              if (Array.isArray(value)) {
+                childRecords[`main_table_${key}`] = value;
+              } else if (value && typeof value === 'object') {
+                relatedRecords[`main_table_${key}`] = value;
+              } else {
+                mainRecord[key] = value;
+              }
             }
-          );
 
-          progressMap.get('main_table')!.status = 'completed';
-          tableDetails.push({ table: 'main_table', rows: mainInserted });
-          totalRecordsInserted += mainInserted;
-          updateProgress();
+            // Insert parent and capture the returned ID using lastInsertRowid
+            const parentColumns = Object.keys(mainRecord);
+            const parentId = insertParentRecordSqlite(connection, 'main_table', parentColumns, parentColumns.map(col => mainRecord[col]));
 
-          // Insert child and related tables
-          for (const [tableName, records] of Object.entries({...childTables, ...relatedTables})) {
-            if (progressMap.has(tableName)) {
-              progressMap.get(tableName)!.status = 'in_progress';
-              updateProgress();
+            // 2. Insert child records with captured parent ID
+            for (const [childTableName, childArray] of Object.entries(childRecords)) {
+              if (!progressMap.has(childTableName)) {
+                progressMap.set(childTableName, {
+                  table: childTableName,
+                  current: 0,
+                  total: dataArray.reduce((sum, r) => sum + (Array.isArray(r[childTableName.replace('main_table_', '')]) ? r[childTableName.replace('main_table_', '')].length : 0), 0),
+                  percentage: 0,
+                  status: 'in_progress',
+                });
+              }
 
-              const inserted = await insertRecordsSqlite(
-                connection,
-                records,
-                tableName,
-                (current) => {
-                  const progress = progressMap.get(tableName)!;
-                  progress.current = current;
-                  progress.percentage = Math.floor((current / progress.total) * 100);
-                  updateProgress();
+              progressMap.get(childTableName)!.status = 'in_progress';
+
+              for (const item of childArray) {
+                if (typeof item === 'object' && item !== null) {
+                  const childColumns = ['main_table_id', ...Object.keys(item)];
+                  const childValues = [parentId, ...Object.keys(item).map(k => item[k])];
+                  insertChildRecordSqlite(connection, childTableName, childColumns, childValues);
+                } else {
+                  insertChildRecordSqlite(connection, childTableName, ['parent_id', 'value'], [parentId, item]);
                 }
-              );
 
-              progressMap.get(tableName)!.status = 'completed';
-              tableDetails.push({ table: tableName, rows: inserted });
-              totalRecordsInserted += inserted;
+                const progress = progressMap.get(childTableName)!;
+                progress.current++;
+                progress.percentage = Math.floor((progress.current / progress.total) * 100);
+                updateProgress();
+              }
+            }
+
+            // 3. Insert related records with captured parent ID
+            for (const [relatedTableName, relatedObj] of Object.entries(relatedRecords)) {
+              if (!progressMap.has(relatedTableName)) {
+                progressMap.set(relatedTableName, {
+                  table: relatedTableName,
+                  current: 0,
+                  total: dataArray.length,
+                  percentage: 0,
+                  status: 'in_progress',
+                });
+              }
+
+              progressMap.get(relatedTableName)!.status = 'in_progress';
+
+              const relatedColumns = ['main_table_id', ...Object.keys(relatedObj)];
+              const relatedValues = [parentId, ...Object.keys(relatedObj).map(k => relatedObj[k])];
+              insertChildRecordSqlite(connection, relatedTableName, relatedColumns, relatedValues);
+
+              const progress = progressMap.get(relatedTableName)!;
+              progress.current++;
+              progress.percentage = Math.floor((progress.current / progress.total) * 100);
               updateProgress();
             }
+          }
+
+          // Mark all tables as completed
+          progressMap.get('main_table')!.status = 'completed';
+          for (const [tableName] of progressMap) {
+            if (tableName !== 'main_table') {
+              progressMap.get(tableName)!.status = 'completed';
+            }
+          }
+          updateProgress();
+
+          // Calculate table details
+          for (const [tableName, progress] of progressMap) {
+            tableDetails.push({ table: tableName, rows: progress.current });
+            totalRecordsInserted += progress.current;
           }
 
           connection.exec('COMMIT');
@@ -525,165 +654,126 @@ export async function executeJsonMigration(
 }
 
 /**
- * Analyze data structure and extract data for each table
+ * Insert parent record and return the generated ID (PostgreSQL)
+ * Uses RETURNING id to capture the auto-generated primary key
  */
-function analyzeDataStructure(records: any[]): {
-  mainTableData: any[];
-  childTables: Record<string, any[]>;
-  relatedTables: Record<string, any[]>;
-} {
-  const mainTableData: any[] = [];
-  const childTables: Record<string, any[]> = {};
-  const relatedTables: Record<string, any[]> = {};
-
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    const mainRecord: any = {};
-
-    // Get the primary key value from the record (usually 'id')
-    const pkValue = record.id !== undefined ? record.id : (i + 1);
-
-    for (const key in record) {
-      const value = record[key];
-
-      if (Array.isArray(value)) {
-        // Array field - becomes child table
-        const childTableName = `main_table_${key}`;
-
-        if (!childTables[childTableName]) {
-          childTables[childTableName] = [];
-        }
-
-        // Each array element becomes a row with FK to parent
-        for (const item of value) {
-          if (typeof item === 'object' && item !== null) {
-            // For arrays of objects, use main_table_id (matches createChildTable schema)
-            childTables[childTableName].push({
-              main_table_id: pkValue,
-              ...item,
-            });
-          } else {
-            // For arrays of primitives, use parent_id (matches createPrimitiveArrayTable schema)
-            childTables[childTableName].push({
-              parent_id: pkValue,
-              value: item,
-            });
-          }
-        }
-      } else if (value && typeof value === 'object') {
-        // Nested object - becomes related table with FK to parent
-        const relatedTableName = `main_table_${key}`;
-
-        if (!relatedTables[relatedTableName]) {
-          relatedTables[relatedTableName] = [];
-        }
-
-        relatedTables[relatedTableName].push({
-          main_table_id: pkValue, // FK to parent table
-          ...value,
-        });
-      } else {
-        // Scalar value - stays in main table
-        mainRecord[key] = value;
-      }
-    }
-
-    mainTableData.push(mainRecord);
-  }
-
-  return { mainTableData, childTables, relatedTables };
-}
-
-/**
- * Insert records into PostgreSQL
- */
-async function insertRecordsPostgres(
+async function insertParentRecordPostgres(
   client: any,
-  records: any[],
   tableName: string,
-  progressCallback?: (current: number) => void
+  columns: string[],
+  values: any[]
 ): Promise<number> {
-  let inserted = 0;
-
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    const columns = Object.keys(record);
-
-    if (columns.length === 0) continue;
-
-    const placeholders = columns.map((_, idx) => `$${idx + 1}`).join(', ');
-    const columnList = columns.map(c => `"${c}"`).join(', ');
-    const values = columns.map(col => record[col]);
-
-    const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders})`;
-
-    await client.query(insertSql, values);
-    inserted++;
-    progressCallback?.(inserted);
+  if (columns.length === 0) {
+    // Insert with default values and return id
+    const result = await client.query(`INSERT INTO "${tableName}" DEFAULT VALUES RETURNING id`);
+    return result.rows[0].id;
   }
 
-  return inserted;
+  const placeholders = columns.map((_, idx) => `$${idx + 1}`).join(', ');
+  const columnList = columns.map(c => `"${c}"`).join(', ');
+  const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders}) RETURNING id`;
+
+  const result = await client.query(insertSql, values);
+  return result.rows[0].id;
 }
 
 /**
- * Insert records into MySQL
+ * Insert child record (PostgreSQL)
  */
-async function insertRecordsMysql(
+async function insertChildRecordPostgres(
+  client: any,
+  tableName: string,
+  columns: string[],
+  values: any[]
+): Promise<void> {
+  const placeholders = columns.map((_, idx) => `$${idx + 1}`).join(', ');
+  const columnList = columns.map(c => `"${c}"`).join(', ');
+  const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders})`;
+
+  await client.query(insertSql, values);
+}
+
+/**
+ * Insert parent record and return the generated ID (MySQL)
+ * Uses LAST_INSERT_ID() to capture the auto-generated primary key
+ */
+async function insertParentRecordMysql(
   connection: any,
-  records: any[],
   tableName: string,
-  progressCallback?: (current: number) => void
+  columns: string[],
+  values: any[]
 ): Promise<number> {
-  let inserted = 0;
-
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    const columns = Object.keys(record);
-
-    if (columns.length === 0) continue;
-
-    const placeholders = columns.map(() => '?').join(', ');
-    const columnList = columns.map(c => `\`${c}\``).join(', ');
-    const values = columns.map(col => record[col]);
-
-    const insertSql = `INSERT INTO \`${tableName}\` (${columnList}) VALUES (${placeholders})`;
-
-    await connection.query(insertSql, values);
-    inserted++;
-    progressCallback?.(inserted);
+  if (columns.length === 0) {
+    // Insert with default values
+    await connection.query(`INSERT INTO \`${tableName}\` () VALUES ()`);
+    const [idResult] = await connection.query('SELECT LAST_INSERT_ID() as id');
+    return idResult[0].id;
   }
 
-  return inserted;
+  const placeholders = columns.map(() => '?').join(', ');
+  const columnList = columns.map(c => `\`${c}\``).join(', ');
+  const insertSql = `INSERT INTO \`${tableName}\` (${columnList}) VALUES (${placeholders})`;
+
+  await connection.query(insertSql, values);
+  const [idResult] = await connection.query('SELECT LAST_INSERT_ID() as id');
+  return idResult[0].id;
 }
 
 /**
- * Insert records into SQLite
+ * Insert child record (MySQL)
  */
-async function insertRecordsSqlite(
-  db: any,
-  records: any[],
+async function insertChildRecordMysql(
+  connection: any,
   tableName: string,
-  progressCallback?: (current: number) => void
-): Promise<number> {
-  let inserted = 0;
+  columns: string[],
+  values: any[]
+): Promise<void> {
+  const placeholders = columns.map(() => '?').join(', ');
+  const columnList = columns.map(c => `\`${c}\``).join(', ');
+  const insertSql = `INSERT INTO \`${tableName}\` (${columnList}) VALUES (${placeholders})`;
 
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    const columns = Object.keys(record);
+  await connection.query(insertSql, values);
+}
 
-    if (columns.length === 0) continue;
-
-    const placeholders = columns.map(() => '?').join(', ');
-    const columnList = columns.map(c => `"${c}"`).join(', ');
-    const values = columns.map(col => record[col]);
-
-    const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders})`;
-
-    const stmt = db.prepare(insertSql);
-    stmt.run(...values);
-    inserted++;
-    progressCallback?.(inserted);
+/**
+ * Insert parent record and return the generated ID (SQLite)
+ * Uses lastInsertRowid to capture the auto-generated primary key
+ */
+function insertParentRecordSqlite(
+  db: any,
+  tableName: string,
+  columns: string[],
+  values: any[]
+): number {
+  if (columns.length === 0) {
+    // Insert with default values
+    const stmt = db.prepare(`INSERT INTO "${tableName}" DEFAULT VALUES`);
+    stmt.run();
+    return db.prepare('SELECT last_insert_rowid() as id').get().id;
   }
 
-  return inserted;
+  const placeholders = columns.map(() => '?').join(', ');
+  const columnList = columns.map(c => `"${c}"`).join(', ');
+  const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders})`;
+
+  const stmt = db.prepare(insertSql);
+  stmt.run(...values);
+  return db.prepare('SELECT last_insert_rowid() as id').get().id;
+}
+
+/**
+ * Insert child record (SQLite)
+ */
+function insertChildRecordSqlite(
+  db: any,
+  tableName: string,
+  columns: string[],
+  values: any[]
+): void {
+  const placeholders = columns.map(() => '?').join(', ');
+  const columnList = columns.map(c => `"${c}"`).join(', ');
+  const insertSql = `INSERT INTO "${tableName}" (${columnList}) VALUES (${placeholders})`;
+
+  const stmt = db.prepare(insertSql);
+  stmt.run(...values);
 }
