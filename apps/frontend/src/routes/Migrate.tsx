@@ -21,6 +21,8 @@ import {
   testConnection,
   previewJsonMigration,
   executeJsonMigration,
+  previewMigration,
+  executeMigration,
   type DatabaseConnection,
   type JsonMigrationPreview,
 } from '@/lib/api';
@@ -133,16 +135,17 @@ export default function Migrate() {
 
   // Generate preview
   const handleGeneratePreview = async () => {
-    if (sourceType !== 'json' || !sourceJsonData) {
-      toast.error('Preview only available for JSON sources');
+    if (!sourceConnected) {
+      toast.error('Please connect to source database first');
       return;
     }
 
     setLoadingPreview(true);
     try {
-      const result = await previewJsonMigration(
-        sourceJsonData,
-        targetType as 'postgres' | 'mysql' | 'sqlite' | 'mongodb'
+      // Use the general migration preview API that works for ALL source types
+      const result = await previewMigration(
+        sourceConn,
+        targetType
       );
 
       if (result.success) {
@@ -160,14 +163,15 @@ export default function Migrate() {
 
   // Execute migration
   const handleRunMigration = async () => {
-    if (sourceType !== 'json' || !sourceJsonData) {
-      toast.error('Migration only supported from JSON currently');
+    if (!sourceConnected || !targetConnected) {
+      toast.error('Please ensure both source and target databases are connected');
       return;
     }
 
     setMigrating(true);
     try {
-      const result = await executeJsonMigration(sourceJsonData, targetConn);
+      // Use the general migration API that works for ALL source→target combinations
+      const result = await executeMigration(sourceConn, targetConn);
 
       if (result.success) {
         setMigrationComplete(true);
