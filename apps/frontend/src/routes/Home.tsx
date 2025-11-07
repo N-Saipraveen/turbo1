@@ -128,17 +128,17 @@ export default function Home() {
             transition={{ duration: 0.5, delay: 0.1 }}
           >
             <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:scale-105"
+              className="cursor-pointer hover:shadow-lg transition-all hover:scale-105 h-full flex flex-col"
               onClick={() => navigate('/convert')}
             >
-              <CardHeader>
+              <CardHeader className="flex-grow">
                 <div className="flex items-center gap-3">
                   <div className="p-3 rounded-lg bg-primary/10">
                     <ArrowRightLeft className="h-6 w-6 text-primary" />
                   </div>
                   <CardTitle>Convert</CardTitle>
                 </div>
-                <CardDescription>
+                <CardDescription className="min-h-[3rem]">
                   Transform schemas and data between SQL, MongoDB, and JSON formats
                 </CardDescription>
               </CardHeader>
@@ -154,17 +154,17 @@ export default function Home() {
             transition={{ duration: 0.5, delay: 0.2 }}
           >
             <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:scale-105"
+              className="cursor-pointer hover:shadow-lg transition-all hover:scale-105 h-full flex flex-col"
               onClick={() => navigate('/visualize')}
             >
-              <CardHeader>
+              <CardHeader className="flex-grow">
                 <div className="flex items-center gap-3">
                   <div className="p-3 rounded-lg bg-primary/10">
                     <Eye className="h-6 w-6 text-primary" />
                   </div>
                   <CardTitle>Visualize</CardTitle>
                 </div>
-                <CardDescription>
+                <CardDescription className="min-h-[3rem]">
                   View ER diagrams and schema relationships in an interactive graph
                 </CardDescription>
               </CardHeader>
@@ -180,18 +180,18 @@ export default function Home() {
             transition={{ duration: 0.5, delay: 0.3 }}
           >
             <Card
-              className="cursor-pointer hover:shadow-lg transition-all hover:scale-105"
+              className="cursor-pointer hover:shadow-lg transition-all hover:scale-105 h-full flex flex-col"
               onClick={() => navigate('/migrate')}
             >
-              <CardHeader>
+              <CardHeader className="flex-grow">
                 <div className="flex items-center gap-3">
                   <div className="p-3 rounded-lg bg-primary/10">
                     <Database className="h-6 w-6 text-primary" />
                   </div>
                   <CardTitle>Migrate</CardTitle>
                 </div>
-                <CardDescription>
-                  Run live migrations from source to target database
+                <CardDescription className="min-h-[3rem]">
+                  Execute live database migrations with batch processing and progress tracking
                 </CardDescription>
               </CardHeader>
               <CardContent>
