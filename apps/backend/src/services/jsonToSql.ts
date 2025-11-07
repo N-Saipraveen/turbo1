@@ -15,6 +15,7 @@ interface TableDefinition {
   columns: ColumnDef[];
   foreignKeys: ForeignKeyDef[];
   uniqueConstraints: string[];
+  primaryKey?: string; // Store the actual PK column name (e.g., '_id' for MongoDB, 'id' for SQL)
 }
 
 interface ColumnDef {
@@ -118,6 +119,7 @@ function analyzeAndNormalizeSchema(
 
   if (existingPK) {
     // Use existing primary key field
+    mainTable.primaryKey = existingPK;
     mainTable.columns.push({
       name: existingPK,
       type: inferSqlType(existingPK, sample[existingPK], dialect),
@@ -126,6 +128,7 @@ function analyzeAndNormalizeSchema(
     });
   } else {
     // Generate auto-increment PK only if no existing PK
+    mainTable.primaryKey = 'id';
     mainTable.columns.push({
       name: 'id',
       type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
@@ -146,7 +149,7 @@ function analyzeAndNormalizeSchema(
       const relatedTable = createRelatedTable(
         relatedTableName,
         value,
-        mainTableName,
+        mainTable,
         dialect
       );
       tables.push(relatedTable);
@@ -164,7 +167,7 @@ function analyzeAndNormalizeSchema(
         const childTable = createChildTable(
           childTableName,
           value[0],
-          mainTableName,
+          mainTable,
           dialect
         );
         tables.push(childTable);
@@ -172,7 +175,7 @@ function analyzeAndNormalizeSchema(
         // Create child table for array of primitives
         const childTable = createPrimitiveArrayTable(
           childTableName,
-          mainTableName,
+          mainTable,
           dialect
         );
         tables.push(childTable);
@@ -182,20 +185,30 @@ function analyzeAndNormalizeSchema(
     }
 
     // Regular scalar field
-    const sqlType = inferSqlType(fieldName, value, dialect);
+    let sqlType = inferSqlType(fieldName, value, dialect);
     const isRequired = value !== null && value !== undefined;
 
     // Check if it's a self-referential foreign key
+    let isSelfReferentialFK = false;
     if (fieldName.endsWith('_id')) {
       const baseName = fieldName.replace(/_id$/, '');
       // Common self-referential patterns
       const selfReferentialPatterns = ['manager', 'supervisor', 'parent', 'reports_to', 'referred_by'];
 
       if (selfReferentialPatterns.includes(baseName)) {
+        isSelfReferentialFK = true;
+
+        // Use the same type as the parent table's primary key
+        const parentPK = mainTable.primaryKey || 'id';
+        const parentPKColumn = mainTable.columns.find((c) => c.name === parentPK);
+        if (parentPKColumn) {
+          sqlType = parentPKColumn.type;
+        }
+
         mainTable.foreignKeys.push({
           column: fieldName,
           referencedTable: mainTableName,
-          referencedColumn: 'id',
+          referencedColumn: parentPK,
         });
       }
     }
@@ -220,7 +233,7 @@ function analyzeAndNormalizeSchema(
 function createRelatedTable(
   tableName: string,
   nestedObject: any,
-  parentTableName: string,
+  parentTable: TableDefinition,
   dialect: 'postgres' | 'mysql' | 'sqlite'
 ): TableDefinition {
   const table: TableDefinition = {
@@ -235,6 +248,7 @@ function createRelatedTable(
 
   if (existingPK) {
     // Use existing primary key
+    table.primaryKey = existingPK;
     table.columns.push({
       name: existingPK,
       type: inferSqlType(existingPK, nestedObject[existingPK], dialect),
@@ -243,6 +257,7 @@ function createRelatedTable(
     });
   } else {
     // Auto-generate PK only if none exists
+    table.primaryKey = 'id';
     table.columns.push({
       name: 'id',
       type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
@@ -251,17 +266,22 @@ function createRelatedTable(
     });
   }
 
-  // Add foreign key to parent
+  // Add foreign key to parent - use parent's actual PK column name and type
+  const parentPK = parentTable.primaryKey || 'id';
+  const parentPKColumn = parentTable.columns.find((c) => c.name === parentPK);
+  const parentPKType = parentPKColumn?.type || 'INT';
+
+  // Create FK column with same type as parent PK
   table.columns.push({
-    name: `${toSnakeCase(parentTableName)}_id`,
-    type: 'INT',
+    name: `${toSnakeCase(parentTable.name)}_${parentPK}`,
+    type: parentPKType,
     nullable: false,
   });
 
   table.foreignKeys.push({
-    column: `${toSnakeCase(parentTableName)}_id`,
-    referencedTable: parentTableName,
-    referencedColumn: 'id',
+    column: `${toSnakeCase(parentTable.name)}_${parentPK}`,
+    referencedTable: parentTable.name,
+    referencedColumn: parentPK,
   });
 
   // Add fields from nested object (skip PK as it's already added)
@@ -282,7 +302,7 @@ function createRelatedTable(
 function createChildTable(
   tableName: string,
   childObject: any,
-  parentTableName: string,
+  parentTable: TableDefinition,
   dialect: 'postgres' | 'mysql' | 'sqlite'
 ): TableDefinition {
   const table: TableDefinition = {
@@ -297,6 +317,7 @@ function createChildTable(
 
   if (existingPK) {
     // Use existing primary key
+    table.primaryKey = existingPK;
     table.columns.push({
       name: existingPK,
       type: inferSqlType(existingPK, childObject[existingPK], dialect),
@@ -305,6 +326,7 @@ function createChildTable(
     });
   } else {
     // Auto-generate PK only if none exists
+    table.primaryKey = 'id';
     table.columns.push({
       name: 'id',
       type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
@@ -313,18 +335,23 @@ function createChildTable(
     });
   }
 
-  // Add foreign key to parent
-  const parentIdColumn = `${toSnakeCase(parentTableName)}_id`;
+  // Add foreign key to parent - use parent's actual PK column name and type
+  const parentPK = parentTable.primaryKey || 'id';
+  const parentPKColumn = parentTable.columns.find((c) => c.name === parentPK);
+  const parentPKType = parentPKColumn?.type || 'INT';
+
+  // Create FK column with same type as parent PK
+  const parentIdColumn = `${toSnakeCase(parentTable.name)}_${parentPK}`;
   table.columns.push({
     name: parentIdColumn,
-    type: 'INT',
+    type: parentPKType,
     nullable: false,
   });
 
   table.foreignKeys.push({
     column: parentIdColumn,
-    referencedTable: parentTableName,
-    referencedColumn: 'id',
+    referencedTable: parentTable.name,
+    referencedColumn: parentPK,
   });
 
   // Add fields from child object (skip PK as it's already added)
@@ -344,7 +371,7 @@ function createChildTable(
 
 function createPrimitiveArrayTable(
   tableName: string,
-  parentTableName: string,
+  parentTable: TableDefinition,
   dialect: 'postgres' | 'mysql' | 'sqlite'
 ): TableDefinition {
   const table: TableDefinition = {
@@ -355,6 +382,7 @@ function createPrimitiveArrayTable(
   };
 
   // Add auto-increment PK
+  table.primaryKey = 'id';
   table.columns.push({
     name: 'id',
     type: dialect === 'postgres' ? 'SERIAL' : dialect === 'mysql' ? 'INT AUTO_INCREMENT' : 'INTEGER',
@@ -362,18 +390,23 @@ function createPrimitiveArrayTable(
     isPrimaryKey: true,
   });
 
-  // Add foreign key to parent
-  const parentIdColumn = 'parent_id';
+  // Add foreign key to parent - use parent's actual PK column name and type
+  const parentPK = parentTable.primaryKey || 'id';
+  const parentPKColumn = parentTable.columns.find((c) => c.name === parentPK);
+  const parentPKType = parentPKColumn?.type || 'INT';
+
+  // Create FK column with same type as parent PK
+  const parentIdColumn = `${toSnakeCase(parentTable.name)}_${parentPK}`;
   table.columns.push({
     name: parentIdColumn,
-    type: 'INT',
+    type: parentPKType,
     nullable: false,
   });
 
   table.foreignKeys.push({
     column: parentIdColumn,
-    referencedTable: parentTableName,
-    referencedColumn: 'id',
+    referencedTable: parentTable.name,
+    referencedColumn: parentPK,
   });
 
   // Add value column for primitive values
