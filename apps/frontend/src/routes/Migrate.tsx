@@ -19,8 +19,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FileUpload } from '@/components/FileUpload';
 import {
   testConnection,
-  previewJsonMigration,
-  executeJsonMigration,
   previewMigration,
   executeMigration,
   type DatabaseConnection,
@@ -42,7 +40,6 @@ export default function Migrate() {
     username: '',
     password: '',
   });
-  const [sourceJsonData, setSourceJsonData] = useState<any>(null);
   const [sourceConnected, setSourceConnected] = useState(false);
 
   // Target configuration
@@ -72,7 +69,6 @@ export default function Migrate() {
   const handleSourceTypeChange = (type: string) => {
     setSourceType(type as DatabaseConnection['type']);
     setSourceConnected(false);
-    setSourceJsonData(null);
 
     if (type === 'json') {
       setSourceConn({ type: 'json' });
@@ -98,7 +94,6 @@ export default function Migrate() {
 
   // Handle JSON upload
   const handleJsonUpload = async (data: any) => {
-    setSourceJsonData(data);
     setSourceConn({ type: 'json', jsonData: data });
     setSourceConnected(true);
     toast.success('JSON data uploaded successfully!');
@@ -218,7 +213,7 @@ export default function Migrate() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-b from-background via-muted/20 to-background">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <motion.div
@@ -226,10 +221,10 @@ export default function Migrate() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8 text-center"
         >
-          <h1 className="mb-2 text-4xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+          <h1 className="mb-2 text-4xl font-bold bg-gradient-to-r from-primary via-purple-500 to-pink-500 bg-clip-text text-transparent">
             Database Migration
           </h1>
-          <p className="text-gray-600">Migrate data from JSON or databases with ease</p>
+          <p className="text-muted-foreground">Migrate data from JSON or databases with ease</p>
         </motion.div>
 
         {/* Progress Steps */}
@@ -624,23 +619,23 @@ export default function Migrate() {
                   ) : (
                     <div className="space-y-4">
                       <div className="grid grid-cols-3 gap-4">
-                        <div className="rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 p-4 text-center">
-                          <div className="text-3xl font-bold text-purple-700">
+                        <div className="rounded-xl bg-gradient-to-br from-primary/10 via-purple-500/10 to-pink-500/10 border border-purple-200 p-4 text-center">
+                          <div className="text-3xl font-bold text-primary">
                             {preview.tableCount}
                           </div>
-                          <div className="text-sm text-purple-600">Tables</div>
+                          <div className="text-sm text-muted-foreground">Tables</div>
                         </div>
-                        <div className="rounded-xl bg-gradient-to-br from-pink-100 to-pink-200 p-4 text-center">
-                          <div className="text-3xl font-bold text-pink-700">
+                        <div className="rounded-xl bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-primary/10 border border-pink-200 p-4 text-center">
+                          <div className="text-3xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
                             {preview.recordCount}
                           </div>
-                          <div className="text-sm text-pink-600">Records</div>
+                          <div className="text-sm text-muted-foreground">Records</div>
                         </div>
-                        <div className="rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 p-4 text-center">
-                          <div className="text-3xl font-bold text-blue-700">
+                        <div className="rounded-xl bg-gradient-to-br from-purple-500/10 via-pink-500/10 to-primary/10 border border-purple-200 p-4 text-center">
+                          <div className="text-3xl font-bold text-purple-600">
                             {targetType.toUpperCase()}
                           </div>
-                          <div className="text-sm text-blue-600">Target</div>
+                          <div className="text-sm text-muted-foreground">Target</div>
                         </div>
                       </div>
 
@@ -654,14 +649,14 @@ export default function Migrate() {
                       {preview.tableSummary && preview.tableSummary.length > 0 && (
                         <div>
                           <Label className="text-lg font-semibold mb-2">Migration Plan</Label>
-                          <div className="rounded-xl bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 p-4 space-y-2">
+                          <div className="rounded-xl bg-gradient-to-r from-primary/10 via-purple-500/10 to-pink-500/10 border border-purple-200 p-4 space-y-2">
                             {preview.tableSummary.map((summary) => (
                               <div
                                 key={summary.table}
                                 className="flex justify-between items-center bg-white rounded-lg px-4 py-2 shadow-sm"
                               >
                                 <span className="font-medium text-gray-700">{summary.table}</span>
-                                <span className="font-bold text-purple-600">
+                                <span className="font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
                                   ~{summary.estimatedRows} rows
                                 </span>
                               </div>

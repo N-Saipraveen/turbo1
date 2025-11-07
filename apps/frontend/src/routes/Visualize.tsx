@@ -11,6 +11,7 @@ import ReactFlow, {
   MiniMap,
   NodeTypes,
   Panel,
+  MarkerType,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { motion } from 'framer-motion';
@@ -105,7 +106,7 @@ export default function Visualize() {
       }
 
       // Convert to React Flow format
-      const flowNodes: Node<TableNodeData>[] = schema.tables.map((table, idx) => ({
+      const flowNodes: Node<TableNodeData>[] = schema.tables.map((table) => ({
         id: table.name,
         type: 'table',
         position: { x: 0, y: 0 }, // Will be set by layout
@@ -122,7 +123,7 @@ export default function Visualize() {
         label: `${rel.fromColumn} → ${rel.toColumn}`,
         style: { stroke: '#3b82f6', strokeWidth: 2 },
         markerEnd: {
-          type: 'arrowclosed',
+          type: MarkerType.ArrowClosed,
           color: '#3b82f6',
         },
       }));
@@ -225,7 +226,7 @@ export default function Visualize() {
   };
 
   return (
-    <div className={`min-h-screen ${isDarkMode ? 'dark bg-gray-950' : 'bg-background'} p-6`}>
+    <div className={`min-h-screen ${isDarkMode ? 'dark bg-gray-950' : 'bg-gradient-to-b from-background via-muted/20 to-background'} p-6`}>
       <div className="container mx-auto max-w-7xl">
         {/* Header */}
         <motion.div
@@ -235,7 +236,9 @@ export default function Visualize() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-4xl font-bold mb-2">Schema Visualizer</h1>
+              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-primary via-purple-500 to-pink-500 bg-clip-text text-transparent">
+                Schema Visualizer
+              </h1>
               <p className="text-muted-foreground">
                 Enterprise-grade ER diagram visualization
               </p>
@@ -325,21 +328,21 @@ export default function Visualize() {
                   />
                 </div>
 
-                <Button onClick={handleVisualize} disabled={loading} className="w-full">
+                <Button onClick={handleVisualize} disabled={loading} className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600">
                   {loading ? 'Parsing...' : 'Visualize Schema'}
                 </Button>
               </CardContent>
             </Card>
 
             {/* Stats */}
-            <Card>
+            <Card className="border-purple-200 bg-gradient-to-br from-primary/5 via-purple-500/5 to-pink-500/5">
               <CardContent className="p-4 space-y-2">
-                <p className="text-sm font-semibold">Graph Statistics</p>
+                <p className="text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Graph Statistics</p>
                 <div className="text-xs space-y-1 text-muted-foreground">
-                  <div>Tables: {nodes.length}</div>
-                  <div>Relationships: {edges.length}</div>
+                  <div>Tables: <span className="font-semibold text-purple-600">{nodes.length}</span></div>
+                  <div>Relationships: <span className="font-semibold text-pink-600">{edges.length}</span></div>
                   <div>
-                    Filtered: {searchTerm ? filteredNodes.length : nodes.length}
+                    Filtered: <span className="font-semibold text-primary">{searchTerm ? filteredNodes.length : nodes.length}</span>
                   </div>
                 </div>
               </CardContent>
@@ -368,9 +371,7 @@ export default function Visualize() {
                   <Background />
                   <Controls />
                   <MiniMap
-                    nodeColor={(node) => {
-                      return '#3b82f6';
-                    }}
+                    nodeColor={() => '#3b82f6'}
                     className="bg-white dark:bg-gray-800"
                   />
 

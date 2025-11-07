@@ -262,14 +262,16 @@ export default function Convert() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
+    <div className="min-h-screen bg-gradient-to-b from-background via-muted/20 to-background p-6">
       <div className="container mx-auto max-w-[1800px]">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-bold mb-2">Convert Schema</h1>
+          <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-primary via-purple-500 to-pink-500 bg-clip-text text-transparent">
+            Convert Schema
+          </h1>
           <p className="text-muted-foreground">
             Transform your database schemas between different formats with full normalization
           </p>
@@ -368,8 +370,8 @@ export default function Convert() {
                   <div className="flex items-center gap-2">
                     <Switch checked={useAi} onCheckedChange={setUseAi} />
                     <Label className="flex items-center gap-1 cursor-pointer">
-                      <Sparkles className="h-4 w-4" />
-                      AI Enhance
+                      <Sparkles className="h-4 w-4 text-pink-500" />
+                      <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent font-semibold">AI Enhance</span>
                     </Label>
                   </div>
                 </div>
@@ -421,20 +423,20 @@ export default function Convert() {
                 <Button
                   onClick={handleConvert}
                   disabled={loading}
-                  className="w-full"
+                  className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
                   size="lg"
                 >
                   {loading ? 'Converting...' : 'Convert Schema'}
                 </Button>
 
                 {result && (
-                  <div className="pt-4 space-y-2 border-t">
-                    <p className="text-sm font-medium">Summary</p>
-                    <div className="text-xs bg-muted p-3 rounded-md space-y-1">
+                  <div className="pt-4 space-y-2 border-t border-purple-200">
+                    <p className="text-sm font-medium bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Summary</p>
+                    <div className="text-xs bg-gradient-to-br from-primary/5 via-purple-500/5 to-pink-500/5 border border-purple-200 p-3 rounded-md space-y-1">
                       {Object.entries(result.summary).map(([key, value]) => (
                         <div key={key} className="flex justify-between">
-                          <span className="font-medium">{key}:</span>
-                          <span>{JSON.stringify(value)}</span>
+                          <span className="font-medium text-purple-700">{key}:</span>
+                          <span className="text-pink-700">{JSON.stringify(value)}</span>
                         </div>
                       ))}
                     </div>
