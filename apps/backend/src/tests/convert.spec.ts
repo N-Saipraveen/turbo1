@@ -71,4 +71,53 @@ describe('JSON to SQL Converter', () => {
     expect(ddl).toBeDefined();
     expect(ddl).toContain('"user_id" INTEGER');
   });
+
+  it('should use _id in foreign key REFERENCES for MongoDB documents', async () => {
+    // MongoDB document with nested structure
+    const jsonContent = JSON.stringify({
+      _id: '690c9ca0c54bcc3591789345',
+      name: 'John Doe',
+      profile: {
+        _id: '690c9ca0c54bcc3591789346',
+        bio: 'Software engineer',
+        avatar_url: 'https://example.com/avatar.jpg'
+      }
+    });
+
+    const result = await convertJsonToSql(jsonContent, 'postgres');
+
+    // Get both table DDLs
+    const mainTableDdl = result.artifacts['main_table.sql'];
+
+    // Verify main table uses _id as PK
+    expect(mainTableDdl).toContain('"_id" TEXT PRIMARY KEY');
+
+    // Verify nested table references parent's _id (not 'id')
+    // The FK column should be main_table__id and reference main_table(_id)
+    expect(mainTableDdl).toContain('REFERENCES "main_table"("_id")');
+
+    // Verify FK column type matches parent PK type (TEXT)
+    expect(mainTableDdl).toContain('"main_table__id" TEXT');
+  });
+
+  it('should handle self-referential foreign keys with _id', async () => {
+    // Employee with manager_id self-reference
+    const jsonContent = JSON.stringify({
+      _id: '690c9ca0c54bcc3591789347',
+      name: 'Alice',
+      manager_id: '690c9ca0c54bcc3591789348'
+    });
+
+    const result = await convertJsonToSql(jsonContent, 'postgres');
+    const ddl = result.artifacts['main_table.sql'];
+
+    // Verify main table uses _id as PK
+    expect(ddl).toContain('"_id" TEXT PRIMARY KEY');
+
+    // Verify self-referential FK references _id (not 'id')
+    expect(ddl).toContain('REFERENCES "main_table"("_id")');
+
+    // Verify manager_id column exists with TEXT type
+    expect(ddl).toContain('"manager_id" TEXT');
+  });
 });
