@@ -160,7 +160,11 @@ async function extractSourceData(sourceConnection: DatabaseConnection): Promise<
   try {
     if (sourceConnection.type === 'mongodb') {
       // Extract from MongoDB
-      const db = connection.db(sourceConnection.database || 'test');
+      if (!sourceConnection.database) {
+        throw new Error('MongoDB database name is required. Please provide the database name in the connection settings.');
+      }
+
+      const db = connection.db(sourceConnection.database);
       const collections = await db.listCollections().toArray();
 
       for (const coll of collections) {

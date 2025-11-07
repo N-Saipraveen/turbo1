@@ -1,6 +1,22 @@
 import { convertJsonToSql } from './jsonToSql.js';
 import { convertJsonToMongo } from './jsonToMongo.js';
 import { DatabaseConnection, getDatabaseConnection, closeDatabaseConnection } from './dbConnection.js';
+import { toSnakeCase } from './common.js';
+
+/**
+ * Detect primary key column from a list of columns
+ */
+function detectPrimaryKey(columns: string[]): string {
+  const pkCandidates = ['_id', 'id', 'uuid', 'ID', 'Id', 'UUID'];
+
+  for (const candidate of pkCandidates) {
+    if (columns.includes(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 'id'; // Default fallback
+}
 
 export interface JsonMigrationPreview {
   success: boolean;
@@ -313,6 +329,10 @@ export async function executeJsonMigration(
             const parentColumns = Object.keys(mainRecord);
             const parentId = await insertParentRecordPostgres(client, 'main_table', parentColumns, parentColumns.map(col => mainRecord[col]));
 
+            // Detect parent's primary key for FK column naming
+            const parentPK = detectPrimaryKey(parentColumns);
+            const parentFKColumn = `${toSnakeCase('main_table')}_${parentPK}`;
+
             // 2. Insert child records (arrays) with captured parent ID
             for (const [childTableName, childArray] of Object.entries(childRecords)) {
               if (!progressMap.has(childTableName)) {
@@ -330,12 +350,12 @@ export async function executeJsonMigration(
               for (const item of childArray) {
                 if (typeof item === 'object' && item !== null) {
                   // Array of objects
-                  const childColumns = ['main_table_id', ...Object.keys(item)];
+                  const childColumns = [parentFKColumn, ...Object.keys(item)];
                   const childValues = [parentId, ...Object.keys(item).map(k => item[k])];
                   await insertChildRecordPostgres(client, childTableName, childColumns, childValues);
                 } else {
                   // Array of primitives
-                  await insertChildRecordPostgres(client, childTableName, ['parent_id', 'value'], [parentId, item]);
+                  await insertChildRecordPostgres(client, childTableName, [parentFKColumn, 'value'], [parentId, item]);
                 }
 
                 const progress = progressMap.get(childTableName)!;
@@ -359,7 +379,7 @@ export async function executeJsonMigration(
 
               progressMap.get(relatedTableName)!.status = 'in_progress';
 
-              const relatedColumns = ['main_table_id', ...Object.keys(relatedObj)];
+              const relatedColumns = [parentFKColumn, ...Object.keys(relatedObj)];
               const relatedValues = [parentId, ...Object.keys(relatedObj).map(k => relatedObj[k])];
               await insertChildRecordPostgres(client, relatedTableName, relatedColumns, relatedValues);
 
@@ -459,6 +479,10 @@ export async function executeJsonMigration(
             const parentColumns = Object.keys(mainRecord);
             const parentId = await insertParentRecordMysql(mysqlConnection, 'main_table', parentColumns, parentColumns.map(col => mainRecord[col]));
 
+            // Detect parent's primary key for FK column naming
+            const parentPK = detectPrimaryKey(parentColumns);
+            const parentFKColumn = `${toSnakeCase('main_table')}_${parentPK}`;
+
             // 2. Insert child records with captured parent ID
             for (const [childTableName, childArray] of Object.entries(childRecords)) {
               if (!progressMap.has(childTableName)) {
@@ -475,11 +499,11 @@ export async function executeJsonMigration(
 
               for (const item of childArray) {
                 if (typeof item === 'object' && item !== null) {
-                  const childColumns = ['main_table_id', ...Object.keys(item)];
+                  const childColumns = [parentFKColumn, ...Object.keys(item)];
                   const childValues = [parentId, ...Object.keys(item).map(k => item[k])];
                   await insertChildRecordMysql(mysqlConnection, childTableName, childColumns, childValues);
                 } else {
-                  await insertChildRecordMysql(mysqlConnection, childTableName, ['parent_id', 'value'], [parentId, item]);
+                  await insertChildRecordMysql(mysqlConnection, childTableName, [parentFKColumn, 'value'], [parentId, item]);
                 }
 
                 const progress = progressMap.get(childTableName)!;
@@ -503,7 +527,7 @@ export async function executeJsonMigration(
 
               progressMap.get(relatedTableName)!.status = 'in_progress';
 
-              const relatedColumns = ['main_table_id', ...Object.keys(relatedObj)];
+              const relatedColumns = [parentFKColumn, ...Object.keys(relatedObj)];
               const relatedValues = [parentId, ...Object.keys(relatedObj).map(k => relatedObj[k])];
               await insertChildRecordMysql(mysqlConnection, relatedTableName, relatedColumns, relatedValues);
 
@@ -600,6 +624,10 @@ export async function executeJsonMigration(
             const parentColumns = Object.keys(mainRecord);
             const parentId = insertParentRecordSqlite(connection, 'main_table', parentColumns, parentColumns.map(col => mainRecord[col]));
 
+            // Detect parent's primary key for FK column naming
+            const parentPK = detectPrimaryKey(parentColumns);
+            const parentFKColumn = `${toSnakeCase('main_table')}_${parentPK}`;
+
             // 2. Insert child records with captured parent ID
             for (const [childTableName, childArray] of Object.entries(childRecords)) {
               if (!progressMap.has(childTableName)) {
@@ -616,11 +644,11 @@ export async function executeJsonMigration(
 
               for (const item of childArray) {
                 if (typeof item === 'object' && item !== null) {
-                  const childColumns = ['main_table_id', ...Object.keys(item)];
+                  const childColumns = [parentFKColumn, ...Object.keys(item)];
                   const childValues = [parentId, ...Object.keys(item).map(k => item[k])];
                   insertChildRecordSqlite(connection, childTableName, childColumns, childValues);
                 } else {
-                  insertChildRecordSqlite(connection, childTableName, ['parent_id', 'value'], [parentId, item]);
+                  insertChildRecordSqlite(connection, childTableName, [parentFKColumn, 'value'], [parentId, item]);
                 }
 
                 const progress = progressMap.get(childTableName)!;
@@ -644,7 +672,7 @@ export async function executeJsonMigration(
 
               progressMap.get(relatedTableName)!.status = 'in_progress';
 
-              const relatedColumns = ['main_table_id', ...Object.keys(relatedObj)];
+              const relatedColumns = [parentFKColumn, ...Object.keys(relatedObj)];
               const relatedValues = [parentId, ...Object.keys(relatedObj).map(k => relatedObj[k])];
               insertChildRecordSqlite(connection, relatedTableName, relatedColumns, relatedValues);
 
