@@ -1,5 +1,6 @@
 import { parseJson } from './json.js';
 import { quoteIdentifier, sanitizeSqlIdentifier, toSnakeCase } from './common.js';
+import { createAIEnhancer } from './aiSqlEnhancer.js';
 
 export interface ConvertOutput {
   artifacts: Record<string, string>;
@@ -8,6 +9,24 @@ export interface ConvertOutput {
     relationships: number;
   };
   warnings: string[];
+  aiSuggestions?: string[];
+  typeCorrections?: Array<{
+    table: string;
+    column: string;
+    originalType: string;
+    suggestedType: string;
+    reason: string;
+  }>;
+}
+
+export interface ConvertOptions {
+  enableAI?: boolean;
+  aiConfig?: {
+    apiKey?: string;
+    model?: string;
+    endpoint?: string;
+  };
+  validateSchema?: boolean;
 }
 
 interface TableDefinition {
@@ -34,10 +53,13 @@ interface ForeignKeyDef {
 
 export async function convertJsonToSql(
   jsonContent: string,
-  dialect: 'postgres' | 'mysql' | 'sqlite' = 'postgres'
+  dialect: 'postgres' | 'mysql' | 'sqlite' = 'postgres',
+  options: ConvertOptions = {}
 ): Promise<ConvertOutput> {
   const warnings: string[] = [];
   const artifacts: Record<string, string> = {};
+  const aiSuggestions: string[] = [];
+  let typeCorrections: ConvertOutput['typeCorrections'] = [];
 
   try {
     const data = parseJson(jsonContent);
@@ -47,7 +69,14 @@ export async function convertJsonToSql(
 
     if (records.length === 0) {
       warnings.push('No data provided');
-      return { artifacts: {}, summary: { tables: 0, relationships: 0 }, warnings };
+      return { artifacts: {}, summary: { tables: 0, relationships: 0 }, warnings, aiSuggestions };
+    }
+
+    // Validation: Check for empty objects
+    const nonEmptyRecords = records.filter(r => r && typeof r === 'object' && Object.keys(r).length > 0);
+    if (nonEmptyRecords.length === 0) {
+      warnings.push('All records are empty objects');
+      return { artifacts: {}, summary: { tables: 0, relationships: 0 }, warnings, aiSuggestions };
     }
 
     // Infer table name from data or use default
@@ -56,10 +85,48 @@ export async function convertJsonToSql(
     );
 
     // Analyze structure and create normalized schema
-    const tables = analyzeAndNormalizeSchema(records, mainTableName, dialect);
+    const tables = analyzeAndNormalizeSchema(nonEmptyRecords, mainTableName, dialect);
 
     // Generate DDL
-    const ddl = generateNormalizedDdl(tables, dialect);
+    let ddl = generateNormalizedDdl(tables, dialect);
+
+    // AI Enhancement (if explicitly enabled and API key provided)
+    if (options.enableAI === true) {
+      const aiEnhancer = createAIEnhancer(options.aiConfig);
+
+      if (aiEnhancer) {
+        try {
+          console.log('🤖 Using AI to enhance SQL schema...');
+          const enhancement = await aiEnhancer.enhanceSchema(
+            ddl,
+            nonEmptyRecords[0],
+            dialect
+          );
+
+          if (enhancement.success && enhancement.improvedSchema) {
+            // Use improved schema if AI enhancement succeeded
+            ddl = enhancement.improvedSchema;
+            aiSuggestions.push(...enhancement.suggestions);
+            warnings.push(...enhancement.warnings);
+            typeCorrections = enhancement.typeCorrections;
+
+            console.log(`✅ AI enhanced schema with ${enhancement.suggestions.length} suggestions`);
+          }
+
+          // Validate relationships if requested
+          if (options.validateSchema) {
+            const validation = await aiEnhancer.validateRelationships(ddl, nonEmptyRecords[0]);
+            if (!validation.valid) {
+              warnings.push(...validation.issues);
+            }
+            aiSuggestions.push(...validation.suggestions);
+          }
+        } catch (aiError) {
+          console.warn('AI enhancement failed, using basic schema:', aiError);
+          warnings.push('AI enhancement unavailable, using basic schema generation');
+        }
+      }
+    }
 
     artifacts[`${mainTableName}.sql`] = ddl;
 
@@ -72,13 +139,19 @@ export async function convertJsonToSql(
         relationships: totalRelationships,
       },
       warnings,
+      aiSuggestions: aiSuggestions.length > 0 ? aiSuggestions : undefined,
+      typeCorrections: typeCorrections.length > 0 ? typeCorrections : undefined,
     };
   } catch (error) {
-    warnings.push(`Conversion error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    warnings.push(`Conversion error: ${errorMsg}`);
+    console.error('JSON to SQL conversion error:', error);
+
     return {
       artifacts: {},
       summary: { tables: 0, relationships: 0 },
       warnings,
+      aiSuggestions,
     };
   }
 }
@@ -104,7 +177,23 @@ function analyzeAndNormalizeSchema(
   dialect: 'postgres' | 'mysql' | 'sqlite'
 ): TableDefinition[] {
   const tables: TableDefinition[] = [];
-  const sample = records[0]; // Use first record as schema template
+
+  if (!records || records.length === 0) {
+    throw new Error('No records provided for schema analysis');
+  }
+
+  // Use first non-null, non-empty record as schema template
+  let sample = records[0];
+  for (const record of records) {
+    if (record && typeof record === 'object' && Object.keys(record).length > 0) {
+      sample = record;
+      break;
+    }
+  }
+
+  if (!sample || typeof sample !== 'object' || Object.keys(sample).length === 0) {
+    throw new Error('No valid records found for schema analysis');
+  }
 
   // Create main table
   const mainTable: TableDefinition = {
@@ -120,12 +209,25 @@ function analyzeAndNormalizeSchema(
   if (existingPK) {
     // Use existing primary key field
     mainTable.primaryKey = existingPK;
-    mainTable.columns.push({
-      name: existingPK,
-      type: inferSqlType(existingPK, sample[existingPK], dialect),
-      nullable: false,
-      isPrimaryKey: true,
-    });
+
+    try {
+      const pkType = inferSqlType(existingPK, sample[existingPK], dialect);
+      mainTable.columns.push({
+        name: existingPK,
+        type: pkType,
+        nullable: false,
+        isPrimaryKey: true,
+      });
+    } catch (error) {
+      console.error(`Error inferring type for primary key ${existingPK}:`, error);
+      // Fallback to TEXT for safety
+      mainTable.columns.push({
+        name: existingPK,
+        type: 'TEXT',
+        nullable: false,
+        isPrimaryKey: true,
+      });
+    }
   } else {
     // Generate auto-increment PK only if no existing PK
     mainTable.primaryKey = 'id';
@@ -139,91 +241,117 @@ function analyzeAndNormalizeSchema(
 
   // Process each field
   for (const [fieldName, value] of Object.entries(sample)) {
-    // Skip internal fields and the primary key we already added
-    if (fieldName === '_collection' || fieldName === existingPK) continue;
+    try {
+      // Skip internal fields and the primary key we already added
+      if (fieldName === '_collection' || fieldName === existingPK) continue;
 
-    // Check if it's a nested object
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      // Create separate table for nested object
-      const relatedTableName = `${mainTableName}_${sanitizeSqlIdentifier(fieldName)}`;
-      const relatedTable = createRelatedTable(
-        relatedTableName,
-        value,
-        mainTable,
-        dialect
-      );
-      tables.push(relatedTable);
-
-      // Don't add column to main table - relationship handled via foreign key in related table
-      continue;
-    }
-
-    // Check if it's an array
-    if (Array.isArray(value)) {
-      const childTableName = `${mainTableName}_${sanitizeSqlIdentifier(fieldName)}`;
-
-      if (value.length > 0 && typeof value[0] === 'object') {
-        // Create child table for array of objects
-        const childTable = createChildTable(
-          childTableName,
-          value[0],
-          mainTable,
-          dialect
-        );
-        tables.push(childTable);
-      } else if (value.length > 0) {
-        // Create child table for array of primitives
-        const childTable = createPrimitiveArrayTable(
-          childTableName,
-          mainTable,
-          dialect
-        );
-        tables.push(childTable);
+      // Validate field name
+      if (!fieldName || fieldName.trim() === '') {
+        console.warn('Skipping empty field name');
+        continue;
       }
-      // Skip arrays in main table - they're normalized
-      continue;
-    }
 
-    // Regular scalar field
-    let sqlType = inferSqlType(fieldName, value, dialect);
-    const isRequired = value !== null && value !== undefined;
+      // Check if it's a nested object
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // Create separate table for nested object
+        const relatedTableName = `${mainTableName}_${sanitizeSqlIdentifier(fieldName)}`;
 
-    // Check if it's a self-referential foreign key
-    let isSelfReferentialFK = false;
-    if (fieldName.endsWith('_id')) {
-      const baseName = fieldName.replace(/_id$/, '');
-      // Common self-referential patterns
-      const selfReferentialPatterns = ['manager', 'supervisor', 'parent', 'reports_to', 'referred_by'];
-
-      if (selfReferentialPatterns.includes(baseName)) {
-        isSelfReferentialFK = true;
-
-        // Use the same type as the parent table's primary key
-        const parentPK = mainTable.primaryKey || 'id';
-        const parentPKColumn = mainTable.columns.find((c) => c.name === parentPK);
-        if (parentPKColumn) {
-          sqlType = parentPKColumn.type;
+        try {
+          const relatedTable = createRelatedTable(
+            relatedTableName,
+            value,
+            mainTable,
+            dialect
+          );
+          tables.push(relatedTable);
+        } catch (error) {
+          console.error(`Error creating related table for ${fieldName}:`, error);
+          // Skip this field but continue processing
         }
 
-        mainTable.foreignKeys.push({
-          column: fieldName,
-          referencedTable: mainTableName,
-          referencedColumn: parentPK,
-        });
+        // Don't add column to main table - relationship handled via foreign key in related table
+        continue;
       }
-    }
 
-    // Check for unique constraints (emails, usernames)
-    const shouldBeUnique = isUniqueField(fieldName, value);
-    if (shouldBeUnique) {
-      mainTable.uniqueConstraints.push(fieldName);
-    }
+      // Check if it's an array
+      if (Array.isArray(value)) {
+        const childTableName = `${mainTableName}_${sanitizeSqlIdentifier(fieldName)}`;
 
-    mainTable.columns.push({
-      name: fieldName,
-      type: sqlType,
-      nullable: !isRequired,
-    });
+        try {
+          if (value.length > 0 && typeof value[0] === 'object') {
+            // Create child table for array of objects
+            const childTable = createChildTable(
+              childTableName,
+              value[0],
+              mainTable,
+              dialect
+            );
+            tables.push(childTable);
+          } else if (value.length > 0) {
+            // Create child table for array of primitives
+            const childTable = createPrimitiveArrayTable(
+              childTableName,
+              mainTable,
+              dialect
+            );
+            tables.push(childTable);
+          }
+        } catch (error) {
+          console.error(`Error creating child table for ${fieldName}:`, error);
+          // Skip this field but continue processing
+        }
+        // Skip arrays in main table - they're normalized
+        continue;
+      }
+
+      // Regular scalar field
+      let sqlType: string;
+      try {
+        sqlType = inferSqlType(fieldName, value, dialect);
+      } catch (error) {
+        console.error(`Error inferring type for ${fieldName}:`, error);
+        sqlType = 'VARCHAR(255)'; // Safe fallback
+      }
+
+      const isRequired = value !== null && value !== undefined;
+
+      // Check if it's a self-referential foreign key
+      if (fieldName.endsWith('_id')) {
+        const baseName = fieldName.replace(/_id$/, '');
+        // Common self-referential patterns
+        const selfReferentialPatterns = ['manager', 'supervisor', 'parent', 'reports_to', 'referred_by'];
+
+        if (selfReferentialPatterns.includes(baseName)) {
+          // Use the same type as the parent table's primary key
+          const parentPK = mainTable.primaryKey || 'id';
+          const parentPKColumn = mainTable.columns.find((c) => c.name === parentPK);
+          if (parentPKColumn) {
+            sqlType = parentPKColumn.type;
+          }
+
+          mainTable.foreignKeys.push({
+            column: fieldName,
+            referencedTable: mainTableName,
+            referencedColumn: parentPK,
+          });
+        }
+      }
+
+      // Check for unique constraints (emails, usernames)
+      const shouldBeUnique = isUniqueField(fieldName, value);
+      if (shouldBeUnique) {
+        mainTable.uniqueConstraints.push(fieldName);
+      }
+
+      mainTable.columns.push({
+        name: fieldName,
+        type: sqlType,
+        nullable: !isRequired,
+      });
+    } catch (error) {
+      console.error(`Error processing field ${fieldName}:`, error);
+      // Skip problematic field but continue
+    }
   }
 
   tables.unshift(mainTable); // Main table goes first

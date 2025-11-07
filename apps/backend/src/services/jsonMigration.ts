@@ -26,7 +26,25 @@ export interface JsonMigrationPreview {
   tableCount?: number;
   recordCount?: number;
   tableSummary?: Array<{ table: string; estimatedRows: number }>;
+  aiSuggestions?: string[];
+  typeCorrections?: Array<{
+    table: string;
+    column: string;
+    originalType: string;
+    suggestedType: string;
+    reason: string;
+  }>;
   error?: string;
+}
+
+export interface MigrationOptions {
+  enableAI?: boolean;
+  aiConfig?: {
+    apiKey?: string;
+    model?: string;
+    endpoint?: string;
+  };
+  validateSchema?: boolean;
 }
 
 export interface MigrationProgress {
@@ -42,7 +60,8 @@ export interface MigrationProgress {
  */
 export async function previewJsonMigration(
   jsonData: any,
-  targetType: 'postgres' | 'mysql' | 'sqlite' | 'mongodb'
+  targetType: 'postgres' | 'mysql' | 'sqlite' | 'mongodb',
+  options?: MigrationOptions
 ): Promise<JsonMigrationPreview> {
   try {
     const dataArray = Array.isArray(jsonData) ? jsonData : [jsonData];
@@ -69,7 +88,11 @@ export async function previewJsonMigration(
       };
     } else {
       // SQL targets (postgres, mysql, sqlite)
-      const result = await convertJsonToSql(JSON.stringify(jsonData), targetType);
+      const result = await convertJsonToSql(JSON.stringify(jsonData), targetType, {
+        enableAI: options?.enableAI,
+        aiConfig: options?.aiConfig,
+        validateSchema: options?.validateSchema,
+      });
 
       // Combine all SQL artifacts into a single schema string
       const schema = Object.values(result.artifacts).join('\n\n');
@@ -88,6 +111,8 @@ export async function previewJsonMigration(
         tableCount: Object.keys(result.artifacts).length,
         recordCount: dataArray.length,
         tableSummary,
+        aiSuggestions: result.aiSuggestions,
+        typeCorrections: result.typeCorrections,
       };
     }
   } catch (error) {
@@ -190,12 +215,14 @@ function extractTableNames(createStatements: string[]): string[] {
 export async function executeJsonMigration(
   jsonData: any,
   targetConnection: DatabaseConnection,
-  progressCallback?: (progress: MigrationProgress[]) => void
+  progressCallback?: (progress: MigrationProgress[]) => void,
+  options?: MigrationOptions
 ): Promise<{
   success: boolean;
   message: string;
   recordsInserted: number;
   tableDetails: Array<{ table: string; rows: number }>;
+  aiSuggestions?: string[];
   errors?: string[]
 }> {
   const dataArray = Array.isArray(jsonData) ? jsonData : [jsonData];
@@ -246,7 +273,11 @@ export async function executeJsonMigration(
     } else {
       // SQL migration - handle normalized schema with child/related tables
       const dialect = targetConnection.type as 'postgres' | 'mysql' | 'sqlite';
-      const result = await convertJsonToSql(JSON.stringify(jsonData), dialect);
+      const result = await convertJsonToSql(JSON.stringify(jsonData), dialect, {
+        enableAI: options?.enableAI,
+        aiConfig: options?.aiConfig,
+        validateSchema: options?.validateSchema,
+      });
 
       // Extract CREATE TABLE statements from artifacts
       const createStatements = Object.values(result.artifacts);
@@ -415,6 +446,7 @@ export async function executeJsonMigration(
             message: `Successfully migrated ${totalRecordsInserted} total records across ${tableDetails.length} tables to PostgreSQL`,
             recordsInserted: totalRecordsInserted,
             tableDetails,
+            aiSuggestions: result.aiSuggestions,
           };
         } catch (error) {
           await client.query('ROLLBACK');
@@ -561,6 +593,7 @@ export async function executeJsonMigration(
             message: `Successfully migrated ${totalRecordsInserted} total records across ${tableDetails.length} tables to MySQL`,
             recordsInserted: totalRecordsInserted,
             tableDetails,
+            aiSuggestions: result.aiSuggestions,
           };
         } catch (error) {
           await mysqlConnection.rollback();
@@ -705,6 +738,7 @@ export async function executeJsonMigration(
             message: `Successfully migrated ${totalRecordsInserted} total records across ${tableDetails.length} tables to SQLite`,
             recordsInserted: totalRecordsInserted,
             tableDetails,
+            aiSuggestions: result.aiSuggestions,
           };
         } catch (error) {
           connection.exec('ROLLBACK');

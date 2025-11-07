@@ -2,7 +2,6 @@ import { DatabaseConnection, getDatabaseConnection, closeDatabaseConnection } fr
 import { previewJsonMigration, executeJsonMigration } from './jsonMigration.js';
 import { introspectDatabaseSchema, type TableSchema } from './schemaIntrospection.js';
 import { convertJsonToSql } from './jsonToSql.js';
-import { convertJsonToMongo } from './jsonToMongo.js';
 import { randomUUID } from 'crypto';
 
 /**
@@ -217,7 +216,7 @@ async function fetchTableData(connection: any, dbType: string, tableName: string
  */
 async function previewToMongoDB(
   sourceData: { tables: Array<{ name: string; rows: any[] }>; totalRecords: number },
-  sourceType: string
+  _sourceType: string
 ): Promise<MigrationPreview> {
   // Group related tables by foreign keys and create document structure
   const documents = groupTablesIntoDocuments(sourceData.tables);
@@ -272,7 +271,7 @@ async function previewToSQL(
 /**
  * Generate sample INSERT statements
  */
-function generateSampleInserts(records: any[], tableName: string, dialect: string): string[] {
+function generateSampleInserts(records: any[], tableName: string, _dialect: string): string[] {
   return records.slice(0, 5).map(record => {
     const columns = Object.keys(record);
     const values = columns.map(col => {
@@ -330,7 +329,7 @@ function groupTablesIntoDocuments(tables: Array<{ name: string; rows: any[]; sch
  */
 async function migrateToMongoDB(
   sourceData: { tables: Array<{ name: string; rows: any[]; schema?: TableSchema }>; totalRecords: number },
-  sourceType: string,
+  _sourceType: string,
   targetConnection: DatabaseConnection
 ): Promise<MigrationResult> {
   const connection = await getDatabaseConnection(targetConnection);
@@ -340,7 +339,7 @@ async function migrateToMongoDB(
   try {
     const db = connection.db(targetConnection.database || 'migrated_db');
 
-    if (sourceType === 'mongodb') {
+    if (_sourceType === 'mongodb') {
       // MongoDB → MongoDB: Direct collection copy
       for (const table of sourceData.tables) {
         const collection = db.collection(table.name);
@@ -396,7 +395,7 @@ async function migrateToMongoDB(
  */
 async function migrateToJSON(
   sourceData: { tables: Array<{ name: string; rows: any[] }>; totalRecords: number },
-  sourceType: string,
+  _sourceType: string,
   targetConnection: DatabaseConnection
 ): Promise<MigrationResult> {
   // JSON export - return the data as JSON
@@ -423,12 +422,12 @@ async function migrateToJSON(
  */
 async function migrateToSQL(
   sourceData: { tables: Array<{ name: string; rows: any[] }>; totalRecords: number },
-  sourceType: string,
+  _sourceType: string,
   targetConnection: DatabaseConnection
 ): Promise<MigrationResult> {
   // Normalize MongoDB documents if source is MongoDB
   let normalizedData = sourceData;
-  if (sourceType === 'mongodb') {
+  if (_sourceType === 'mongodb') {
     normalizedData = {
       ...sourceData,
       tables: sourceData.tables.map(table => ({
