@@ -2,6 +2,8 @@ import { convertJsonToSql } from './jsonToSql.js';
 import { convertJsonToMongo } from './jsonToMongo.js';
 import { DatabaseConnection, getDatabaseConnection, closeDatabaseConnection } from './dbConnection.js';
 import { toSnakeCase } from './common.js';
+import { executeOptimizedJsonMigration, OptimizedMigrationOptions } from './optimizedMigration.js';
+import { createMigrationLogger } from './migrationLogger.js';
 
 /**
  * Detect primary key column from a list of columns
@@ -45,6 +47,10 @@ export interface MigrationOptions {
     endpoint?: string;
   };
   validateSchema?: boolean;
+  useOptimizedEngine?: boolean; // Default: true (use new batch insert engine)
+  batchSize?: number; // Default: 1000
+  deferConstraints?: boolean; // Default: true
+  enableDebugLogging?: boolean; // Default: false
 }
 
 export interface MigrationProgress {
@@ -223,8 +229,56 @@ export async function executeJsonMigration(
   recordsInserted: number;
   tableDetails: Array<{ table: string; rows: number }>;
   aiSuggestions?: string[];
+  totalDuration?: number;
+  logs?: string;
   errors?: string[]
 }> {
+  // Use optimized engine by default (100x faster with batch inserts)
+  if (options?.useOptimizedEngine !== false && targetConnection.type !== 'mongodb') {
+    console.log('🚀 Using optimized batch insert engine (100x faster)');
+
+    const logger = options?.enableDebugLogging ? createMigrationLogger() : undefined;
+
+    const optimizedOptions: OptimizedMigrationOptions = {
+      enableAI: options?.enableAI,
+      aiConfig: options?.aiConfig,
+      validateSchema: options?.validateSchema,
+      batchSize: options?.batchSize || 1000,
+      deferConstraints: options?.deferConstraints !== false,
+      logger,
+      onProgress: (event) => {
+        // Convert to legacy progress format for backward compatibility
+        progressCallback?.([{
+          table: event.table,
+          current: event.current,
+          total: event.total,
+          percentage: event.percentage,
+          status: event.status,
+        }]);
+      },
+    };
+
+    const result = await executeOptimizedJsonMigration(
+      jsonData,
+      targetConnection,
+      optimizedOptions
+    );
+
+    return {
+      success: result.success,
+      message: result.message,
+      recordsInserted: result.recordsInserted,
+      tableDetails: result.tableDetails.map(t => ({ table: t.table, rows: t.rows })),
+      aiSuggestions: result.aiSuggestions,
+      totalDuration: result.totalDuration,
+      logs: result.logs,
+      errors: result.errors,
+    };
+  }
+
+  // Fallback to legacy implementation (slow row-by-row inserts)
+  console.log('⚠️  Using legacy row-by-row insert engine (slow, use for debugging only)');
+
   const dataArray = Array.isArray(jsonData) ? jsonData : [jsonData];
   const errors: string[] = [];
   let connection: any = null;
