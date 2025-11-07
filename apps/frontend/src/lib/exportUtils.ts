@@ -4,7 +4,7 @@ import { UnifiedSchema } from './schemaParser';
 /**
  * Export diagram as PNG
  */
-export async function exportToPng(elementId: string, filename: string = 'diagram.png'): Promise<void> {
+export async function exportToPng(_elementId: string, filename: string = 'diagram.png'): Promise<void> {
   const element = document.querySelector(`.react-flow`) as HTMLElement;
   if (!element) {
     throw new Error('Diagram element not found');
@@ -29,7 +29,7 @@ export async function exportToPng(elementId: string, filename: string = 'diagram
 /**
  * Export diagram as SVG
  */
-export async function exportToSvg(elementId: string, filename: string = 'diagram.svg'): Promise<void> {
+export async function exportToSvg(_elementId: string, filename: string = 'diagram.svg'): Promise<void> {
   const element = document.querySelector(`.react-flow`) as HTMLElement;
   if (!element) {
     throw new Error('Diagram element not found');

@@ -63,10 +63,14 @@ function TableNode({ data, selected }: NodeProps<TableNodeData>) {
             {/* PK/FK Icon */}
             <div className="flex-shrink-0 w-4">
               {column.isPrimaryKey && (
-                <Key className="h-3 w-3 text-yellow-600 dark:text-yellow-400" title="Primary Key" />
+                <div title="Primary Key">
+                  <Key className="h-3 w-3 text-yellow-600 dark:text-yellow-400" />
+                </div>
               )}
               {column.isForeignKey && !column.isPrimaryKey && (
-                <Link className="h-3 w-3 text-blue-600 dark:text-blue-400" title="Foreign Key" />
+                <div title="Foreign Key">
+                  <Link className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                </div>
               )}
             </div>
 
