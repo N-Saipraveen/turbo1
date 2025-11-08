@@ -429,7 +429,7 @@ Create `.env` files:
 **Backend (`apps/backend/.env`):**
 ```env
 # OpenAI (for AI-enhanced schema generation)
-OPENAI_API_KEY=sk-Wa6KkAFngRs0h8B17opjRljBhDNxHlxWBo7pVwGmIhnxwo8A
+OPENAI_API_KEY=sk-xx
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_ENDPOINT=https://api.chatanywhere.tech/v1
 
